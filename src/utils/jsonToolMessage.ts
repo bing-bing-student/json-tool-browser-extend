@@ -1,18 +1,15 @@
 import { ElMessage } from 'element-plus';
 
 const MESSAGE_CUSTOM_CLASS = 'json-tool-message';
+const MESSAGE_OFFSET = 2;
 type MessageType = 'success' | 'error' | 'warning' | 'info';
 
 export const globalNotify = (type: MessageType, message: string, duration?: number) => {
-    const offset = 68;
-
-    document.documentElement.style.setProperty('--json-message-offset', `${offset}px`);
-
     ElMessage({
         message,
         type,
         duration,
-        offset,
+        offset: MESSAGE_OFFSET,
         customClass: MESSAGE_CUSTOM_CLASS,
     });
 };
