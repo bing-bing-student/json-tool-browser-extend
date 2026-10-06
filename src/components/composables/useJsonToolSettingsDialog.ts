@@ -154,16 +154,6 @@ export const useJsonToolSettingsDialog = (ctx: UseJsonToolSettingsDialogCtx) => 
     );
 
     watch(
-        () => ctx.buttonVisibility.value.fullscreen,
-        (newVal) => {
-            if (!newVal) {
-                ctx.buttonVisibility.value.fullscreen = true;
-            }
-        },
-        { immediate: true },
-    );
-
-    watch(
         () => ctx.buttonVisibility.value,
         () => {
             ctx.checkToolBarScroll();

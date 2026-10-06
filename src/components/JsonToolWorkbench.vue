@@ -12,7 +12,7 @@
         </div>
 
         <!-- 原有的 JSON 工具容器 -->
-        <div class="json-tool-container" :class="{ fullscreen: isFullscreen }">
+        <div class="json-tool-container">
             <!-- 工具栏 -->
             <div class="tool-bar-wrapper">
                 <!-- 左侧渐变遮罩和滚动按钮 -->
@@ -127,13 +127,6 @@
                             </el-button>
                         </div>
 
-                        <el-button
-                            v-if="buttonVisibility.fullscreen"
-                            :type="isFullscreen ? 'info' : 'warning'"
-                            class="fullscreen-btn"
-                            @click="toggleFullscreen">
-                            {{ isFullscreen ? settingsTxt.exitFullscreen : settingsTxt.enterFullscreen }}
-                        </el-button>
                     </div>
                 </div>
 
@@ -446,7 +439,6 @@
             v-model:word-wrap="effectiveWordWrap"
             v-model:sync-scroll-enabled="syncScrollEnabled"
             v-model:sticky-scroll="stickyScroll"
-            v-model:default-fullscreen="defaultFullscreen"
             v-model:show-minimap="showMinimap"
             v-model:encoding-mode="encodingMode"
             v-model:array-new-line="arrayNewLine"
@@ -880,8 +872,6 @@ const {
     fontSize,
     arrayNewLine,
     preserveNumberLiterals,
-    isFullscreen,
-    defaultFullscreen,
     showMinimap,
     enableDiagnostics,
     preferredEnableDiagnostics,
@@ -962,23 +952,10 @@ const countLinesWithoutSplit = (text: string): number => {
     return count;
 };
 
-// ==================== 全屏管理 ====================
-
-// 切换全屏状态
-const toggleFullscreen = () => {
-    isFullscreen.value = !isFullscreen.value;
-};
-
-// 监听 ESC 键退出全屏
+// Esc 退出 Diff，恢复普通编辑器。
 const handleEscapeKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-        if (diffMode.isDiffMode.value) {
-            void diffMode.exitDiffMode();
-            return;
-        }
-        if (isFullscreen.value) {
-            isFullscreen.value = false;
-        }
+    if (event.key === 'Escape' && diffMode.isDiffMode.value) {
+        void diffMode.exitDiffMode();
     }
 };
 
@@ -1112,7 +1089,6 @@ const diffMode = useDiffMode({
     settingsTxt,
     locale: computed(() => props.locale),
     tabId,
-    isFullscreen,
     isTabPageClosing,
     showMinimap,
     fontSize,
@@ -2785,23 +2761,6 @@ const { cancelPendingLevelAnalysis, destroyLevelAnalysisWorker, scheduleInputLev
     clearOutputFoldingInfo,
     clearOutputEditor: () => setOutputEditorValue('', 'json', true),
     showDepthLimitError: () => showMessageError(settingsTxt.value.msgJsonLevelTooDeep),
-});
-
-const relayoutEditors = () => {
-    updateEditorHeight(inputEditor);
-    updateEditorHeight(outputEditor);
-    diffMode.layoutDiffEditors();
-    handleResize();
-};
-
-// 全屏 class 落到 DOM 后，等下一帧再同步 Monaco 尺寸。
-watch(isFullscreen, () => {
-    nextTick(() => {
-        requestAnimationFrame(() => {
-            relayoutEditors();
-            requestAnimationFrame(relayoutEditors);
-        });
-    });
 });
 
 let inputMarkersListener: monaco.IDisposable | null = null;
@@ -5019,16 +4978,6 @@ const transferToInput = (e: MouseEvent) => {
     }
 }
 
-/* 全屏样式 */
-.json-tool-container.fullscreen {
-    position: fixed;
-    inset: 0;
-    z-index: 1500;
-    width: 100%;
-    height: 100%;
-    background-color: var(--json-tool-bg);
-}
-
 /* 工具栏包装器 */
 .tool-bar-wrapper {
     position: relative;
@@ -5878,72 +5827,6 @@ const transferToInput = (e: MouseEvent) => {
     }
 }
 
-/* 全屏按钮自定义为黄色 */
-.fullscreen-btn {
-    background-color: #eab308 !important;
-    border-color: #eab308 !important;
-    color: #fff !important;
-}
-
-.fullscreen-btn:hover {
-    background-color: #ca8a04 !important;
-    border-color: #ca8a04 !important;
-}
-
-.fullscreen-btn:active {
-    background-color: #a16207 !important;
-    border-color: #a16207 !important;
-}
-
-/* 退出全屏状态下按钮显示为灰色（与 type="info" 的设置按钮保持一致） */
-.fullscreen-btn.el-button--info {
-    background-color: #909399 !important;
-    border-color: #909399 !important;
-    color: #fff !important;
-}
-
-.fullscreen-btn.el-button--info:hover {
-    background-color: #a6a9ad !important;
-    border-color: #a6a9ad !important;
-}
-
-.fullscreen-btn.el-button--info:active {
-    background-color: #82848a !important;
-    border-color: #82848a !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn {
-    background-color: #765a18 !important;
-    border-color: #9a7420 !important;
-    color: #fff6d7 !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn:hover {
-    background-color: #8b6a1d !important;
-    border-color: #b48524 !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn:active {
-    background-color: #684f15 !important;
-    border-color: #8b6a1d !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn.el-button--info {
-    background-color: #3a3a3a !important;
-    border-color: #4a4a4a !important;
-    color: #e0e0e0 !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn.el-button--info:hover {
-    background-color: #464646 !important;
-    border-color: #5a5a5a !important;
-}
-
-.json-tool-root.theme-dark .fullscreen-btn.el-button--info:active {
-    background-color: #303030 !important;
-    border-color: #464646 !important;
-}
-
 /* 同步滚动按钮自定义为蓝色 */
 .editor-container {
     display: flex;
@@ -6542,15 +6425,6 @@ const transferToInput = (e: MouseEvent) => {
     display: flex;
     gap: 0;
     align-items: center;
-}
-
-/* 确保 Element Plus 的弹出层在全屏模式下正常显示 */
-:deep(.el-popper) {
-    z-index: 2000 !important;
-}
-
-:deep(.el-overlay) {
-    z-index: 1800 !important;
 }
 
 /* 当设置弹窗打开时，隐藏其遮罩层的滚动条 */

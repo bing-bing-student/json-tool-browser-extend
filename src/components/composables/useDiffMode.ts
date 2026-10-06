@@ -4,7 +4,7 @@
 // 与 useDiffEditors 的边界：
 //   - useDiffEditors 只负责 Monaco 双编辑器的实例 + diff 计算 / 装饰 / 同步滚动 / 草稿存取
 //   - useDiffMode 在它之上叠加：
-//       * isDiffMode / 全屏快照 / pagehide 监听 / 状态切换
+//       * isDiffMode / pagehide 监听 / 状态切换
 //       * diffFormatJSON / diffSortJSON / diffCopy / diffClear / diffHandleUpload / diffDownload
 //       * sendInputContentToDiff / sendContentToDiff（普通模式 → diff 草稿）
 //
@@ -37,9 +37,8 @@ export interface UseDiffModeCtx {
     settingsTxt: Ref<SettingsTxt>;
     locale: Ref<'zh' | 'en' | undefined>;
 
-    // 标签页 / 全屏 / 关闭状态
+    // 标签页 / 关闭状态
     tabId: Ref<string>;
-    isFullscreen: Ref<boolean>;
     isTabPageClosing: Ref<boolean>;
 
     // 设置项（直接复用 useToolSettings 的 ref）
@@ -147,7 +146,6 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
     const diffRightEditorContainer = ref<HTMLElement | null>(null);
     const diffLeftEditorStatus = ref('');
     const diffRightEditorStatus = ref('');
-    let wasFullscreenBeforeDiff = false;
     let sendToDiffContextKeyPairs: Array<{ left: InputContextKeyHandle; right: InputContextKeyHandle }> = [];
 
     // ==================== 包裹 useDiffEditors ====================
@@ -199,11 +197,9 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
 
     // ==================== 模式生命周期 ====================
     const enterDiffMode = () => {
-        wasFullscreenBeforeDiff = ctx.isFullscreen.value;
         ctx.cacheNormalEditorsState();
         ctx.destroyNormalEditors();
         isDiffMode.value = true;
-        ctx.isFullscreen.value = true;
         // 实际 createDiffEditor 由子组件 onMounted 触发（v-if 渲染后才有 DOM 容器）
     };
 
@@ -212,7 +208,6 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
         void saveDiffDraft('退出 diff');
         destroyDiffEditor();
         isDiffMode.value = false;
-        ctx.isFullscreen.value = wasFullscreenBeforeDiff;
         await ctx.restoreNormalEditors();
     };
 

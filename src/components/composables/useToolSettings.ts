@@ -6,9 +6,6 @@
 // - saveSettings 在初始化阶段（isInitializing）抑制写入，避免 watch 触发的早期噪声；
 // - 一个 deep watch 监听所有字段，发生变化时自动调用 saveSettings；
 // - 暴露 markInitialized() 给 onMounted 末尾调用，正式开启持久化。
-//
-// 注意：isFullscreen 不会被持久化，它在挂载时通过 watch(defaultFullscreen, immediate)
-// 同步一次默认值，之后由用户操作驱动。
 
 import { ref, watch, type Ref } from 'vue';
 
@@ -27,8 +24,8 @@ export interface ButtonVisibility {
     sort: boolean;
     archive: boolean;
     diff: boolean;
-    // 模板里历史上还会读 format / collapse / fullscreen 等可选键（默认不存在，渲染为 undefined → 不显示）
-    [key: string]: boolean | undefined;
+    format?: boolean;
+    collapse?: boolean;
 }
 
 export interface PersistedSettings {
@@ -36,7 +33,6 @@ export interface PersistedSettings {
     recursiveUnescape: boolean;
     wordWrap: boolean;
     fontSize: number;
-    isFullscreen: boolean;
     syncScrollEnabled: boolean;
     showMinimap: boolean;
     enableDiagnostics: boolean;
@@ -49,7 +45,6 @@ export interface PersistedSettings {
     customArchiveName: boolean;
     stickyScroll: boolean;
     themeMode: JsonToolThemeMode;
-    defaultFullscreen?: boolean;
 }
 
 const defaultSettings: PersistedSettings = {
@@ -66,7 +61,6 @@ const defaultSettings: PersistedSettings = {
     recursiveUnescape: true,
     wordWrap: true,
     fontSize: 12,
-    isFullscreen: false,
     syncScrollEnabled: true,
     showMinimap: false,
     enableDiagnostics: true,
@@ -86,12 +80,20 @@ const loadSettingsFromStorage = (): PersistedSettings => {
     try {
         const parsed = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || 'null');
         if (parsed) {
+            // 只读取当前支持的设置，旧版本中已删除的字段不再参与运行或保存。
+            const currentSettings = Object.fromEntries(
+                Object.entries(parsed).filter(([key]) => Object.hasOwn(defaultSettings, key)),
+            );
             return {
                 ...defaultSettings,
-                ...parsed,
+                ...currentSettings,
                 buttonVisibility: {
                     ...defaultSettings.buttonVisibility,
-                    ...Object.fromEntries(Object.entries(parsed.buttonVisibility ?? {}).filter(([key]) => key !== 'fetchJson' && key !== 'share')),
+                    ...Object.fromEntries(
+                        Object.entries(parsed.buttonVisibility ?? {}).filter(
+                            ([key]) => Object.hasOwn(defaultSettings.buttonVisibility, key) || key === 'format' || key === 'collapse',
+                        ),
+                    ),
                 },
             };
         }
@@ -108,8 +110,6 @@ export interface UseToolSettingsReturn {
     wordWrap: Ref<boolean>;
     fontSize: Ref<number>;
     arrayNewLine: Ref<boolean>;
-    defaultFullscreen: Ref<boolean>;
-    isFullscreen: Ref<boolean>;
     showMinimap: Ref<boolean>;
     enableDiagnostics: Ref<boolean>;
     preferredEnableDiagnostics: Ref<boolean>;
@@ -142,18 +142,6 @@ export const useToolSettings = (): UseToolSettingsReturn => {
     const fontSize = ref(savedSettings.fontSize || 12);
     const arrayNewLine = ref(savedSettings.arrayNewLine);
     const preserveNumberLiterals = { value: true } as const;
-    const isFullscreen = ref(false);
-    const defaultFullscreen = ref(savedSettings.defaultFullscreen ?? savedSettings.isFullscreen ?? false);
-
-    // 页面加载时，isFullscreen 跟随 defaultFullscreen 设置
-    watch(
-        defaultFullscreen,
-        (val) => {
-            isFullscreen.value = val;
-        },
-        { immediate: true },
-    );
-
     const showMinimap = ref(savedSettings.showMinimap ?? false);
     const enableDiagnostics = ref(savedSettings.enableDiagnostics ?? true);
     const preferredEnableDiagnostics = ref(enableDiagnostics.value);
@@ -175,8 +163,6 @@ export const useToolSettings = (): UseToolSettingsReturn => {
             recursiveUnescape: recursiveUnescape.value,
             wordWrap: wordWrap.value,
             fontSize: fontSize.value,
-            isFullscreen: isFullscreen.value,
-            defaultFullscreen: defaultFullscreen.value,
             syncScrollEnabled: syncScrollEnabled.value,
             showMinimap: showMinimap.value,
             enableDiagnostics: preferredEnableDiagnostics.value,
@@ -204,8 +190,6 @@ export const useToolSettings = (): UseToolSettingsReturn => {
             recursiveUnescape.value,
             wordWrap.value,
             fontSize.value,
-            isFullscreen.value,
-            defaultFullscreen.value,
             syncScrollEnabled.value,
             showMinimap.value,
             enableDiagnostics.value,
@@ -236,8 +220,6 @@ export const useToolSettings = (): UseToolSettingsReturn => {
         wordWrap,
         fontSize,
         arrayNewLine,
-        defaultFullscreen,
-        isFullscreen,
         showMinimap,
         enableDiagnostics,
         preferredEnableDiagnostics,

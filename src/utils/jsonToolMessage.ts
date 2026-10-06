@@ -3,16 +3,8 @@ import { ElMessage } from 'element-plus';
 const MESSAGE_CUSTOM_CLASS = 'json-tool-message';
 type MessageType = 'success' | 'error' | 'warning' | 'info';
 
-const getJsonToolMessageOffset = () => {
-    const jsonToolContainer = document.querySelector('.json-tool-container');
-    if (jsonToolContainer?.classList.contains('fullscreen')) {
-        return 2;
-    }
-    return 68;
-};
-
 export const globalNotify = (type: MessageType, message: string, duration?: number) => {
-    const offset = getJsonToolMessageOffset();
+    const offset = 68;
 
     document.documentElement.style.setProperty('--json-message-offset', `${offset}px`);
 

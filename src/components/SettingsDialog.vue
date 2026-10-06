@@ -142,22 +142,6 @@
                                 <span class="switch-card-desc">{{ settingsTxt.stickyScrollStaticDesc }}</span>
                             </div>
 
-                            <!-- 默认全屏（仅普通模式） -->
-                            <div v-if="!isDiffMode" class="switch-card">
-                                <div class="switch-card-head">
-                                    <span class="switch-card-title">
-                                        {{ defaultFullscreenModel ? settingsTxt.fullscreenTitleOn : settingsTxt.fullscreenTitleOff }}
-                                    </span>
-                                    <el-switch
-                                        class="switch-card-toggle"
-                                        v-model="defaultFullscreenModel"
-                                        :inactive-value="false"
-                                        :active-value="true"
-                                        size="default" />
-                                </div>
-                                <span class="switch-card-desc">{{ settingsTxt.fullscreenStaticDesc }}</span>
-                            </div>
-
                             <!-- 缩略图（仅普通模式） -->
                             <div v-if="!isDiffMode" class="switch-card">
                                 <div class="switch-card-head">
@@ -349,7 +333,6 @@ interface Props {
     wordWrap: boolean;
     syncScrollEnabled: boolean;
     stickyScroll: boolean;
-    defaultFullscreen: boolean;
     showMinimap: boolean;
     encodingMode: boolean;
     arrayNewLine: boolean;
@@ -373,7 +356,6 @@ const emit = defineEmits<{
     'update:wordWrap': [value: boolean];
     'update:syncScrollEnabled': [value: boolean];
     'update:stickyScroll': [value: boolean];
-    'update:defaultFullscreen': [value: boolean];
     'update:showMinimap': [value: boolean];
     'update:encodingMode': [value: boolean];
     'update:arrayNewLine': [value: boolean];
@@ -405,7 +387,6 @@ const enableDiagnosticsModel = createModel('enableDiagnostics');
 const wordWrapModel = createModel('wordWrap');
 const syncScrollEnabledModel = createModel('syncScrollEnabled');
 const stickyScrollModel = createModel('stickyScroll');
-const defaultFullscreenModel = createModel('defaultFullscreen');
 const showMinimapModel = createModel('showMinimap');
 const encodingModeModel = createModel('encodingMode');
 const arrayNewLineModel = createModel('arrayNewLine');
