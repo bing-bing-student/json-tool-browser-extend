@@ -1751,6 +1751,20 @@ const getLargeFileOptions = (enableLargeFileFolding: boolean) =>
 const isLargeEditorContent = (lineCount: number, contentLength: number) =>
     lineCount >= LARGE_EDITOR_LINE_THRESHOLD || contentLength >= LARGE_EDITOR_CHAR_THRESHOLD;
 
+// 保留普通引导线，只有聚焦且启用括号引导线时才显示激活效果。
+const getEditorGuideOptions = (enableBracketPairs: boolean, isFocused: boolean): monaco.editor.IGuidesOptions => ({
+    indentation: true,
+    bracketPairs: enableBracketPairs,
+    bracketPairsHorizontal: enableBracketPairs && isFocused ? 'active' : false,
+    highlightActiveBracketPair: enableBracketPairs && isFocused,
+    highlightActiveIndentation: enableBracketPairs && isFocused,
+});
+
+const syncEditorGuideFocus = (editor: monaco.editor.IStandaloneCodeEditor) => {
+    const enableBracketPairs = editor.getOption(monaco.editor.EditorOption.guides).bracketPairs !== false;
+    editor.updateOptions({ guides: getEditorGuideOptions(enableBracketPairs, editor.hasWidgetFocus()) });
+};
+
 // 异步扫描尚未完成前，用户也可能点击 Monaco 的 “Show more”。捕获危险长度并立即进入
 // 强制换行保护；安全长度继续交给 Monaco 原生 longLinesHelper 展开。
 const handleUnsafeLongLineMouseDown = (event: MouseEvent, side: 'input' | 'output') => {
@@ -1790,6 +1804,7 @@ const getEditorOptions = (
     enableLargeFileFolding: boolean = false,
     lineCount: number = 1,
     contentLength: number = 0,
+    isFocused: boolean = false,
 ) => {
     const isLargeEditor = isLargeEditorContent(lineCount, contentLength);
 
@@ -1855,11 +1870,7 @@ const getEditorOptions = (
         occurrencesHighlight: isLargeEditor ? ('off' as const) : ('singleFile' as const),
         renderValidationDecorations: isLargeEditor && isReadOnly ? ('off' as const) : ('on' as const),
         matchBrackets: isLargeEditor ? ('near' as const) : ('always' as const),
-        guides: {
-            indentation: true, // 始终显示缩进引导线
-            bracketPairs: !isLargeEditor,
-            highlightActiveIndentation: !isLargeEditor,
-        },
+        guides: getEditorGuideOptions(!isLargeEditor, isFocused),
         bracketPairColorization: {
             enabled: !isLargeEditor,
         },
@@ -1897,11 +1908,7 @@ const syncEditorLargeFileOptions = (editor: monaco.editor.IStandaloneCodeEditor 
         selectionHighlight: !isLargeEditor,
         occurrencesHighlight: isLargeEditor ? ('off' as const) : ('singleFile' as const),
         matchBrackets: isLargeEditor ? ('near' as const) : ('always' as const),
-        guides: {
-            indentation: true,
-            bracketPairs: !isLargeEditor,
-            highlightActiveIndentation: !isLargeEditor,
-        },
+        guides: getEditorGuideOptions(!isLargeEditor, editor.hasWidgetFocus()),
         bracketPairColorization: {
             enabled: !isLargeEditor,
         },
@@ -1938,7 +1945,15 @@ const updateInputEditorConfig = (language?: EditorContentLanguage) => {
     }
 
     inputEditor.updateOptions(
-        getEditorOptions(displayIndentSize, false, resolvedLanguage, true, getEditorLineCount(inputEditor), inputEditor.getModel()?.getValueLength() ?? 0),
+        getEditorOptions(
+            displayIndentSize,
+            false,
+            resolvedLanguage,
+            true,
+            getEditorLineCount(inputEditor),
+            inputEditor.getModel()?.getValueLength() ?? 0,
+            inputEditor.hasWidgetFocus(),
+        ),
     );
     syncEditorDisplayOptions(inputEditor, resolvedLanguage, indentSize.value);
     if (resolvedLanguage === 'json') {
@@ -1965,7 +1980,15 @@ const updateOutputEditorConfig = (language: string = 'json', enableLargeFileFold
 
     // 更新编辑器配置
     outputEditor.updateOptions(
-        getEditorOptions(displayIndentSize, true, language, enableLargeFileFolding, getEditorLineCount(outputEditor), outputEditor.getModel()?.getValueLength() ?? 0),
+        getEditorOptions(
+            displayIndentSize,
+            true,
+            language,
+            enableLargeFileFolding,
+            getEditorLineCount(outputEditor),
+            outputEditor.getModel()?.getValueLength() ?? 0,
+            outputEditor.hasWidgetFocus(),
+        ),
     );
     syncEditorDisplayOptions(outputEditor, language, fallbackIndentSize);
     if (language === 'json') {
@@ -2360,15 +2383,17 @@ const updateEditorStatus = (editor: monaco.editor.IStandaloneCodeEditor | null, 
         return;
     }
 
-    const selection = editor.getSelection();
-    if (!selection) {
+    const model = editor.getModel();
+    if (!model) {
         statusRef.value = '';
         return;
     }
 
-    const model = editor.getModel();
-    if (!model) {
-        statusRef.value = '';
+    const totalLines = model.getLineCount();
+    const selection = editor.getSelection();
+    // 失焦时显示默认行列和实际总行数，后台更新也不能恢复旧光标或选区信息。
+    if (!editor.hasWidgetFocus() || !selection) {
+        statusRef.value = settingsTxt.value.statusCursor(1, 1, totalLines);
         return;
     }
 
@@ -2376,7 +2401,6 @@ const updateEditorStatus = (editor: monaco.editor.IStandaloneCodeEditor | null, 
     const endLine = selection.endLineNumber;
     const startColumn = selection.startColumn;
     const endColumn = selection.endColumn;
-    const totalLines = model.getLineCount();
 
     // 检查是否有选中内容（不是光标位置）
     const hasSelection = !selection.isEmpty();
@@ -2446,9 +2470,19 @@ const updateEditorStatus = (editor: monaco.editor.IStandaloneCodeEditor | null, 
     }
 };
 
-// 设置编辑器选择变化监听
+// 设置编辑器状态监听
 const setupSelectionListener = (editor: monaco.editor.IStandaloneCodeEditor | null, statusRef: { value: string }) => {
     if (!editor) return [];
+
+    // 使用组件焦点，保留编辑器内部查找等控件的状态显示。
+    const focusDisposable = editor.onDidFocusEditorWidget(() => {
+        syncEditorGuideFocus(editor);
+        updateEditorStatus(editor, statusRef);
+    });
+    const blurDisposable = editor.onDidBlurEditorWidget(() => {
+        syncEditorGuideFocus(editor);
+        updateEditorStatus(editor, statusRef);
+    });
 
     // 监听选择变化
     const selectionDisposable = editor.onDidChangeCursorSelection(() => {
@@ -2465,9 +2499,10 @@ const setupSelectionListener = (editor: monaco.editor.IStandaloneCodeEditor | nu
         updateEditorStatus(editor, statusRef);
     });
 
-    // 初始化状态
+    // 初始化普通模式和 Diff 模式的引导线及状态。
+    syncEditorGuideFocus(editor);
     updateEditorStatus(editor, statusRef);
-    return [selectionDisposable, contentDisposable, modelDisposable];
+    return [focusDisposable, blurDisposable, selectionDisposable, contentDisposable, modelDisposable];
 };
 
 watch(settingsTxt, () => {

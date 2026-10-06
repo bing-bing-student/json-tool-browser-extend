@@ -182,7 +182,9 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
             const existingInfo = infoElements.get(lineNumber);
             const infoText = ` ${foldingInfo.summary.type === 'object' ? `${foldingInfo.summary.count} keys` : `${foldingInfo.summary.count} items`}`;
             if (existingInfo) {
-                existingInfo.element.textContent = infoText;
+                if (existingInfo.element.textContent !== infoText) {
+                    existingInfo.element.textContent = infoText;
+                }
 
                 if (existingInfo.foldedElement === foldedElement && existingInfo.element.isConnected) {
                     return;
@@ -341,7 +343,8 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
                     });
 
                     if (hasFoldingChange) {
-                        pruneDisconnectedInfoElements();
+                        // Monaco 重建折叠行后，在本次绘制前补回摘要，避免下一帧才恢复时闪烁。
+                        updateVisibleFoldingInfoIfNeeded();
                         scheduleImmediateUpdate();
                     }
                 });
@@ -389,7 +392,7 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
                 return;
             }
             const target = e.target as Element;
-            const isFoldingClick = target.closest('.folding') || target.closest('.inline-folded');
+            const isFoldingClick = target.closest('.folding, .codicon-folding-expanded, .codicon-folding-collapsed, .inline-folded');
             if (isFoldingClick) {
                 scheduleImmediateUpdate();
             }
