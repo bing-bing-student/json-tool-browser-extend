@@ -5853,6 +5853,8 @@ const transferToInput = (e: MouseEvent) => {
 
 /* 添加分隔线样式 */
 .resizer {
+    /* 原网站使用 content-box：20px 内容宽度加左右各 1px 边框。 */
+    box-sizing: content-box;
     width: 20px;
     background-color: var(--json-tool-surface-soft);
     cursor: col-resize;
