@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "JSON 本地工具",
+  "version": "1.0.0",
+  "description": "在本地格式化、压缩、校验、转换、排序、脱敏和对比 JSON，支持文件导入导出与本地存档。",
+  "minimum_chrome_version": "120",
+  "action": {
+    "default_title": "打开 JSON 本地工具",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "background": { "service_worker": "background.js" },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; worker-src 'self';"
+  }
+}
+
