@@ -37,15 +37,75 @@ const INLINE_DIFF_MAX_LINE_LEN = 200_000;
 const INLINE_DIFF_WINDOW_LIMIT = 20_000;
 
 /**
- * 把一行代码归一化为"结构内容"：去掉首尾空白、把 tab 视作等同于空格压缩、
- * 最终只保留内部非空白串的序列（用单个空格分隔）。这样 `  "a":1` 和 `\t"a": 1`
- * 以及 `"a": 1  ` 会被视作同一行，不会误报成 diff——这符合 JSON diff 的语义。
- *
- * 注意：归一化仅用于行级匹配，返回的 change 行号仍使用原始行号，
- * 高亮显示、同步按钮位置等用户可见内容不会受影响。
+ * 字符串外沿用连续空白压缩和首尾空白忽略，字符串内保持原文。
+ * 跟踪 JSON5 单引号、转义和注释；跨行保留字符串状态，避免改写续行内容。
+ * 归一化只用于行级匹配，差异的行号与行内列号仍对应原始文本。
  */
-const normalizeLineForDiff = (line: string): string => {
-    return line.replace(/\s+/g, ' ').trim();
+const normalizeLinesForDiff = (lines: string[]): string[] => {
+    let quote: '"' | "'" | null = null;
+    let inBlockComment = false;
+
+    return lines.map((line) => {
+        if (!quote && !inBlockComment && !line.includes('"') && !line.includes("'") && !line.includes('/*')) {
+            return line.replace(/\s+/g, ' ').trim();
+        }
+
+        let normalized = '';
+        let pendingWhitespace = false;
+        let inLineComment = false;
+
+        for (let index = 0; index < line.length; index++) {
+            if (quote) {
+                const start = index;
+                while (index < line.length) {
+                    const char = line[index++];
+                    if (char === '\\' && index < line.length) {
+                        index++;
+                    } else if (char === quote) {
+                        quote = null;
+                        break;
+                    }
+                }
+                normalized += line.slice(start, index);
+                index--;
+                continue;
+            }
+
+            const char = line[index];
+            if (/\s/.test(char)) {
+                pendingWhitespace = normalized.length > 0;
+                continue;
+            }
+            if (pendingWhitespace) {
+                normalized += ' ';
+                pendingWhitespace = false;
+            }
+            normalized += char;
+
+            if (inLineComment) continue;
+            const next = line[index + 1];
+            if (inBlockComment) {
+                if (char === '*' && next === '/') {
+                    normalized += next;
+                    index++;
+                    inBlockComment = false;
+                }
+                continue;
+            }
+
+            if (char === '"' || char === "'") {
+                quote = char;
+            } else if (char === '/' && next === '*') {
+                normalized += next;
+                index++;
+                inBlockComment = true;
+            } else if (char === '#' || (char === '/' && next === '/')) {
+                inLineComment = true;
+            }
+        }
+
+        return normalized;
+    });
 };
 
 const trimHistogramRegion = (leftNorm: string[], rightNorm: string[], region: HistogramRegion): HistogramRegion | null => {
@@ -184,8 +244,8 @@ export const computeLineDiff = (leftLines: string[], rightLines: string[]): Diff
     const m = leftLines.length;
     const n = rightLines.length;
 
-    const leftNorm = leftLines.map(normalizeLineForDiff);
-    const rightNorm = rightLines.map(normalizeLineForDiff);
+    const leftNorm = normalizeLinesForDiff(leftLines);
+    const rightNorm = normalizeLinesForDiff(rightLines);
 
     if (m === 0 && n === 0) return [];
 
