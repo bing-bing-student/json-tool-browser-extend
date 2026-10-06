@@ -11,10 +11,10 @@ const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'json-tool-test-'));
 const bundle = path.join(directory, 'core.mjs');
 await build({
     stdin: {
-        contents: `export * from './src/components/JsonTool/utils/jsonEngine/index.ts';
-export * from './src/components/JsonTool/utils/jsonSort.ts';
-export * from './src/components/JsonTool/utils/jsonConvert.ts';
-export * from './src/components/JsonTool/utils/diffEngine.ts';`,
+        contents: `export * from './src/components/utils/jsonEngine/index.ts';
+export * from './src/components/utils/jsonSort.ts';
+export * from './src/components/utils/jsonConvert.ts';
+export * from './src/components/utils/diffEngine.ts';`,
         resolveDir: process.cwd(), loader: 'ts',
     },
     bundle: true, platform: 'browser', format: 'esm', outfile: bundle,

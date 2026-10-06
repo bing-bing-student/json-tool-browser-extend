@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import JsonToolWorkbench from './components/JsonTool/JsonToolWorkbench.vue';
+import JsonToolWorkbench from './components/JsonToolWorkbench.vue';
 
 const LOCALE_KEY = 'json-tool-locale';
 const readLocale = (): 'zh' | 'en' => {

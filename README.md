@@ -74,7 +74,7 @@ public/
   icons/                    插件图标
 src/
   App.vue                   独立入口和语言状态
-  components/JsonTool/      编辑器、弹窗、本地处理逻辑与 Worker
+  components/              编辑器、弹窗、本地处理逻辑与 Worker
   utils/jsonToolMessage.ts  消息提示
 scripts/
   vite/monaco-large-folding.mjs  原工具的大文件折叠补丁
