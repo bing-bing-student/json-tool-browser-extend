@@ -1,4 +1,4 @@
-# JSON 本地工具浏览器插件
+# JSON 工具箱浏览器插件
 
 独立的 Vue 3 + TypeScript + Vite 项目，使用 Chrome Manifest V3。点击浏览器工具栏中的插件图标，会打开完整的 JSON 编辑器标签页。
 
@@ -9,7 +9,7 @@
 1. 打开 Chrome 的 `chrome://extensions`，或 Edge 的 `edge://extensions`。
 2. 开启「开发者模式」。
 3. 点击「加载已解压的扩展程序」，选择本项目的 `dist` 目录。
-4. 将「JSON 本地工具」固定到工具栏，点击图标打开工具。
+4. 将「JSON 工具箱」固定到工具栏，点击图标打开工具。
 
 如果使用发布 ZIP，请先解压，再选择包含 `manifest.json` 的目录。`dist/index.html` 由浏览器插件加载，不需要启动博客服务。
 

@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "JSON 本地工具",
+  "name": "JSON 工具箱",
   "version": "1.0.0",
   "description": "在本地格式化、压缩、校验、转换、排序、脱敏和对比 JSON，支持文件导入导出与本地存档。",
   "minimum_chrome_version": "120",
   "action": {
-    "default_title": "打开 JSON 本地工具",
+    "default_title": "打开 JSON 工具箱",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"

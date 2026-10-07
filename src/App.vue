@@ -20,7 +20,7 @@ const switchLocale = () => {
 };
 watch(locale, (value) => {
     document.documentElement.lang = value === 'en' ? 'en' : 'zh-CN';
-    document.title = value === 'en' ? 'Local JSON Tools' : 'JSON 本地工具';
+    document.title = value === 'en' ? 'JSON Toolbox' : 'JSON 工具箱';
     try {
         localStorage.setItem(LOCALE_KEY, value);
     } catch {
