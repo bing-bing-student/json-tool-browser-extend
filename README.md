@@ -46,9 +46,10 @@ npm run typecheck
 npm test
 npm run build
 npm run package
+npm run verify-package
 ```
 
-`build` 依次进行类型检查、生产构建和本地模式检查。`package` 生成 `release/json-tool-extension-1.0.0.zip`，可用于分发或提交扩展商店；商店上架还需要准备截图、说明等发布材料。
+`build` 依次进行类型检查、生产构建和本地模式检查。`package` 生成 `release/json-tool-extension-1.0.0.zip`，可用于分发或提交扩展商店；商店上架资料见 [商店发布资料](./store/商店发布资料.md)。每次打包会生成源码指纹与 ZIP 校验记录，上传前用 `npm run verify-package` 确认安装包对应当前源码。
 
 ## 编辑器报错排查
 
