@@ -1,0 +1,27 @@
+{
+    "orderId": 900719925474099312345,
+    "status": "pending",
+    "currency": "CNY",
+    "customer": {
+        "id": "customer-demo-01",
+        "name": "示例用户"
+    },
+    "items": [
+        { "sku": "KB-001", "name": "机械键盘", "quantity": 1 },
+        { "sku": "MS-002", "name": "无线鼠标", "quantity": 1 }
+    ],
+    "payment": {
+        "subtotal": 428.00,
+        "shippingFee": 12.00,
+        "total": 440.00,
+        "paid": false
+    },
+    "shipping": {
+        "city": "上海",
+        "method": "standard",
+        "trackingNumber": null
+    },
+    "tags": ["new", "online"],
+    "legacyCode": "OLD-ORDER-001",
+    "note": "等待确认库存"
+}

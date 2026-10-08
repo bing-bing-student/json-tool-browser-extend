@@ -1,0 +1,27 @@
+[
+    {
+        "id": "format",
+        "name": "格式化",
+        "enabled": true
+    },
+    {
+        "id": "diff",
+        "name": "差异对比",
+        "enabled": true
+    },
+    {
+        "id": "validate",
+        "name": "语法校验",
+        "enabled": true
+    },
+    {
+        "id": "mask",
+        "name": "数据脱敏",
+        "enabled": false
+    },
+    {
+        "id": "archive",
+        "name": "本地存档",
+        "enabled": true
+    }
+]
