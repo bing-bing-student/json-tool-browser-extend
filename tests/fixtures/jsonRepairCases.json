@@ -1,0 +1,382 @@
+[
+  {
+    "name": "对象缺逗号",
+    "input": "{\"a\":1 \"b\":2}",
+    "expected": "{\"a\":1,\"b\":2}"
+  },
+  {
+    "name": "对象缺冒号",
+    "input": "{\"a\" 1}",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "数组缺逗号",
+    "input": "[1 2 3]",
+    "expected": "[1,2,3]"
+  },
+  {
+    "name": "缺对象闭合括号",
+    "input": "{\"a\":1",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "嵌套数组截断",
+    "input": "{\"users\":[{\"id\":1},{\"id\":2}",
+    "expected": "{\"users\":[{\"id\":1},{\"id\":2}]}"
+  },
+  {
+    "name": "缺字符串结束引号",
+    "input": "{\"name\":\"bing}",
+    "expected": "{\"name\":\"bing\"}"
+  },
+  {
+    "name": "字符串内部未转义引号",
+    "input": "{\"text\":\"he said \"hello\" today\"}",
+    "expected": "{\"text\":\"he said \\\"hello\\\" today\"}"
+  },
+  {
+    "name": "中文弯引号",
+    "input": "{“name”:“bing”}",
+    "expected": "{\"name\":\"bing\"}"
+  },
+  {
+    "name": "字符串中直接换行",
+    "input": "{\"text\":\"hello\nworld\"}",
+    "expected": "{\"text\":\"hello\\nworld\"}"
+  },
+  {
+    "name": "未加引号的值",
+    "input": "{\"name\":John}",
+    "expected": "{\"name\":\"John\"}"
+  },
+  {
+    "name": "数组尾部截断",
+    "input": "[1,2,",
+    "expected": "[1,2]"
+  },
+  {
+    "name": "多余闭合括号",
+    "input": "{\"a\":1}}",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "Markdown 包裹",
+    "input": "```json\n{\"a\":1}\n```",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "Python 常量",
+    "input": "{'enabled':True,'missing':None,'other':False}",
+    "expected": "{\"enabled\":true,\"missing\":null,\"other\":false}"
+  },
+  {
+    "name": "JSONP 包裹",
+    "input": "callback({\"a\":1});",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "MongoDB 数字及日期",
+    "input": "{\"id\":NumberLong(7634073368949850917),\"date\":ISODate(\"2026-10-09\")}",
+    "expected": "{\"id\":7634073368949850917,\"date\":\"2026-10-09\"}"
+  },
+  {
+    "name": "字符串拼接",
+    "input": "{\"text\":\"hello \" + \"world\"}",
+    "expected": "{\"text\":\"hello world\"}"
+  },
+  {
+    "name": "省略号",
+    "input": "[1,2,...]",
+    "expected": "[1,2]"
+  },
+  {
+    "name": "NDJSON 多个根对象",
+    "input": "{\"id\":1}\n{\"id\":2}",
+    "expected": "[{\"id\":1},{\"id\":2}]"
+  },
+  {
+    "name": "HTML 编码引号",
+    "input": "{&quot;name&quot;:&quot;bing&quot;}",
+    "expected": "{\"name\":\"bing\"}"
+  },
+  {
+    "name": "字符串外零宽空格",
+    "input": "{​\"name\":\"bing\"}",
+    "expected": "{\"name\":\"bing\"}"
+  },
+  {
+    "name": "大整数加缺逗号",
+    "input": "{\"id\":7634073368949850917 \"a\":1}",
+    "expected": "{\"id\":7634073368949850917,\"a\":1}"
+  },
+  {
+    "name": "高精度小数加缺逗号",
+    "input": "{\"amount\":99999999999999999.99 \"a\":1}",
+    "expected": "{\"amount\":99999999999999999.99,\"a\":1}"
+  },
+  {
+    "name": "科学计数法加缺逗号",
+    "input": "{\"amount\":1e+20 \"a\":1}",
+    "expected": "{\"amount\":1e+20,\"a\":1}"
+  },
+  {
+    "name": "合法 Unicode 转义加缺逗号",
+    "input": "{\"raw\":\"\\u0041\" \"a\":1}",
+    "expected": "{\"raw\":\"\\u0041\",\"a\":1}"
+  },
+  {
+    "name": "异常 Unicode 转义加缺逗号",
+    "input": "{\"raw\":\"\\uXX\" \"a\":1}",
+    "expected": "{\"raw\":\"\\uXX\",\"a\":1}"
+  },
+  {
+    "name": "异常十六进制转义加缺逗号",
+    "input": "{\"raw\":\"\\xZZ\" \"a\":1}",
+    "expected": "{\"raw\":\"\\xZZ\",\"a\":1}"
+  },
+  {
+    "name": "# 注释加缺逗号",
+    "input": "{\n# comment\n\"a\":1 \"b\":2\n}",
+    "expected": "{\"a\":1,\"b\":2}"
+  },
+  {
+    "name": "NaN 加缺逗号",
+    "input": "{\"a\":NaN \"b\":2}",
+    "expected": "{\"a\":null,\"b\":2}"
+  },
+  {
+    "name": "Infinity 加缺逗号",
+    "input": "{\"a\":Infinity \"b\":2}",
+    "expected": "{\"a\":null,\"b\":2}"
+  },
+  {
+    "name": "十六进制数字加缺逗号",
+    "input": "{\"a\":0xFF \"b\":2}",
+    "expected": "{\"a\":255,\"b\":2}"
+  },
+  {
+    "name": "单引号内转义加缺逗号",
+    "input": "{name:'a\\'b' x:1}",
+    "expected": "{\"name\":\"a'b\",\"x\":1}"
+  },
+  {
+    "name": "缺失字段值",
+    "input": "{\"amount\":}",
+    "expected": null
+  },
+  {
+    "name": "截断小数",
+    "input": "{\"amount\":12.",
+    "expected": null
+  },
+  {
+    "name": "截断科学计数法",
+    "input": "{\"amount\":1e+",
+    "expected": null
+  },
+  {
+    "name": "截断字符串",
+    "input": "{\"name\":\"bi",
+    "expected": null
+  },
+  {
+    "name": "前导零数字",
+    "input": "{\"code\":00789}",
+    "expected": null
+  },
+  {
+    "name": "普通文字",
+    "input": "this is not JSON",
+    "expected": null
+  },
+  {
+    "name": "HTML 错误响应",
+    "input": "<html><body>Error</body></html>",
+    "expected": null
+  },
+  {
+    "name": "空数组项",
+    "input": "[1,,3]",
+    "expected": null
+  },
+  {
+    "name": "显式正整数加缺逗号",
+    "input": "{\"a\":+99 \"b\":2}",
+    "expected": "{\"a\":99,\"b\":2}"
+  },
+  {
+    "name": "显式高精度正整数加缺逗号",
+    "input": "{\"a\":+900719925474099312345 \"b\":2}",
+    "expected": "{\"a\":900719925474099312345,\"b\":2}"
+  },
+  {
+    "name": "显式正小数加缺逗号",
+    "input": "{\"a\":+.50 \"b\":+1.}",
+    "expected": "{\"a\":0.50,\"b\":1.0}"
+  },
+  {
+    "name": "显式正科学计数法加缺逗号",
+    "input": "{\"a\":+1.2300e+20 \"b\":2}",
+    "expected": "{\"a\":1.2300e+20,\"b\":2}"
+  },
+  {
+    "name": "数组中显式正数加缺逗号",
+    "input": "[+1 +2 +.5 +3e+10]",
+    "expected": "[1,2,0.5,3e+10]"
+  },
+  {
+    "name": "用户样本裸文字前缀",
+    "input": "test\n{\n// 已有格式化能力可以处理，无需修复\nname:'Alice',enabled:true,missing:undefined,invalid:NaN,hex:0xFF,tags:['json','json5',],\n}",
+    "expected": "{\"name\":\"Alice\",\"enabled\":true,\"missing\":null,\"invalid\":null,\"hex\":255,\"tags\":[\"json\",\"json5\"]}"
+  },
+  {
+    "name": "主体前后裸文字",
+    "input": "说明文字\n{\"a\":1}\n处理结束",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "主体前后明确字符串",
+    "input": "\"test\"\n{\"a\":1}\n\"end\"",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "主体前后单引号及弯引号字符串",
+    "input": "'test'\n{“a”:“b”}\n‘end’",
+    "expected": "{\"a\":\"b\"}"
+  },
+  {
+    "name": "同一行前后文字",
+    "input": "test {\"a\":1} end",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "对象尾部字符串",
+    "input": "{\"a\":1}\n\"end\"",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "数组主体保留内部字符串",
+    "input": "test\n[\"keep\",{\"id\":1},\"end\"]\n\"drop\"",
+    "expected": "[\"keep\",{\"id\":1},\"end\"]"
+  },
+  {
+    "name": "多个对象伴随外围文字",
+    "input": "start\n{\"id\":1}\n\"separator\"\n{\"id\":2}\nend",
+    "expected": "[{\"id\":1},{\"id\":2}]"
+  },
+  {
+    "name": "多个数组保持数组层级",
+    "input": "[1,2]\n[3,4]",
+    "expected": "[[1,2],[3,4]]"
+  },
+  {
+    "name": "相邻多个根对象",
+    "input": "{\"id\":1}{\"id\":2}",
+    "expected": "[{\"id\":1},{\"id\":2}]"
+  },
+  {
+    "name": "根对象与根数组组合",
+    "input": "{\"id\":1}\n[2,3]",
+    "expected": "[{\"id\":1},[2,3]]"
+  },
+  {
+    "name": "保留根数字布尔和null",
+    "input": "123\n{\"a\":1}\nfalse null",
+    "expected": "[123,{\"a\":1},false,null]"
+  },
+  {
+    "name": "合并值保留数字精度和正号兼容",
+    "input": "900719925474099312345\n{a:+99 b:undefined}\n+1.2300e+20",
+    "expected": "[900719925474099312345,{\"a\":99,\"b\":null},1.2300e+20]"
+  },
+  {
+    "name": "外围文字中的数字不是根值",
+    "input": "HTTP 200 response\n{\"a\":1}\nend 300",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "外围字符串括号不作为对象",
+    "input": "\"text {not json} [0]\"\n{\"content\":\"[]{}\"}\n\"end\"",
+    "expected": "{\"content\":\"[]{}\"}"
+  },
+  {
+    "name": "嵌套字段和数组字符串不删除",
+    "input": "test\n{\"message\":\"test\",\"items\":[\"first\",{\"value\":\"last\"},\"end\"]}\nend",
+    "expected": "{\"message\":\"test\",\"items\":[\"first\",{\"value\":\"last\"},\"end\"]}"
+  },
+  {
+    "name": "注释括号和字符串注释符不影响主体",
+    "input": "/* {\"fake\":true} */ label\n{\"url\":\"https://a/#b/*notcomment*/\"} // end",
+    "expected": "{\"url\":\"https://a/#b/*notcomment*/\"}"
+  },
+  {
+    "name": "外围英文撇号文字",
+    "input": "don't keep this\n{\"a\":1}\nit's the end",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "外围文字及截断对象",
+    "input": "test\n{\"a\":1",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "外围文字及截断数组",
+    "input": "test\n[1,2,",
+    "expected": "[1,2]"
+  },
+  {
+    "name": "多个对象及末尾截断",
+    "input": "{\"a\":1}\n{\"b\":2",
+    "expected": "[{\"a\":1},{\"b\":2}]"
+  },
+  {
+    "name": "主体转义和精度保护保留",
+    "input": "test\n{\"id\":900719925474099312345 \"raw\":\"\\uXX\" \"hex\":\"\\x41\"}\nend",
+    "expected": "{\"id\":900719925474099312345,\"raw\":\"\\uXX\",\"hex\":\"\\x41\"}"
+  },
+  {
+    "name": "数组内缺逗号保留字符串元素",
+    "input": "[\"keep\" {\"id\":1} \"end\"]",
+    "expected": "[\"keep\",{\"id\":1},\"end\"]"
+  },
+  {
+    "name": "外围正则字符串不误识别为对象",
+    "input": "/a{2}/\n{\"b\":1}",
+    "expected": "{\"b\":1}"
+  },
+  {
+    "name": "独立正则修复保持原有规则",
+    "input": "/a{2}/",
+    "expected": "\"/a{2}/\""
+  },
+  {
+    "name": "对象内正则括号保留后续字段",
+    "input": "test\n{\"pattern\":/a\\}/ \"n\":1}\nend",
+    "expected": "{\"pattern\":\"/a\\\\}/\",\"n\":1}"
+  },
+  {
+    "name": "字符串形式的JSON不作为额外根对象",
+    "input": "\"{\\\"fake\\\":true}\"\n{\"a\":1}\n\"123\"",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "说明标签中的带括号字符串不影响主体",
+    "input": "label:\"{not json} [0]\"\n{\"a\":1}",
+    "expected": "{\"a\":1}"
+  },
+  {
+    "name": "对象内裸URL不误识别为正则",
+    "input": "test\n{\"url\":https://example.com}\nend",
+    "expected": "{\"url\":\"https://example.com\"}"
+  },
+  {
+    "name": "对象内裸URL路径保留后续字段",
+    "input": "test\n{\"url\":https://example.com/a/b \"id\":1}\nend",
+    "expected": "{\"url\":\"https://example.com/a/b\",\"id\":1}"
+  },
+  {
+    "name": "说明文字内正则括号不作为根对象",
+    "input": "note /a{2}/\n{\"b\":1}\nend",
+    "expected": "{\"b\":1}"
+  }
+]

@@ -1,6 +1,6 @@
 {
   "name": "json-tool-extension",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -11,7 +11,7 @@
     "build": "vue-tsc --noEmit && vite build && node scripts/check-local-only.mjs && node scripts/write-build-info.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "vue-tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --import ./scripts/register-typescript-tests.mjs --test --test-concurrency=2 tests/*.test.mjs",
     "package": "npm run build && node scripts/package.mjs",
     "verify-package": "node scripts/verify-package.mjs"
   },
@@ -25,7 +25,8 @@
     "js-base64": "3.7.8",
     "js-yaml": "4.3.2",
     "json5": "2.2.3",
-    "jsonc-parser": "3.3.1"
+    "jsonc-parser": "3.3.1",
+    "jsonrepair": "3.15.0"
   },
   "devDependencies": {
     "vite": "7.3.7",

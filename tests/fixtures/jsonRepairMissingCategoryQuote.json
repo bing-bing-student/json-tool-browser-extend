@@ -1,0 +1,28 @@
+{
+  "orders": [
+    {
+      "orderId": "O0",
+      "createdAt": "2024-01-01",
+      "status": "pending",
+      "items": [
+        {
+          "sku": "S0",
+          "title": "JM键盘",
+          "qty": 1,
+          "price": 1,
+          "category": "数码
+        }
+      ],
+      "amount": {
+        "goods": 1,
+        "freight": 0,
+        "discount": 2,
+        "payable": -1
+      },
+      "remark": "工作日送",
+      "tags": [
+        "首单"
+      ]
+    }
+  ]
+}

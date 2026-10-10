@@ -18,7 +18,6 @@ const FOLDING_INFO_SCROLL_INTERVAL_MS = 50;
 interface JsonFoldingInfoDisplayOptions {
     getSummaryIndex: () => JsonFoldingSummaryIndex;
     getOutputType: () => string;
-    domObserverMaxLines: number;
 }
 
 interface FoldingInfoElement {
@@ -31,7 +30,8 @@ const hasInlineFoldedElement = (node: Node) => node instanceof Element && (node.
 export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCodeEditor, options: JsonFoldingInfoDisplayOptions) => {
     if (!editor) return;
 
-    const getActiveModel = () => editor.getModel();
+    let disposed = false;
+    const getActiveModel = () => disposed ? null : editor.getModel();
 
     const getFoldingInfo = (lineNumber: number): { lineNumber: number; summary: JsonFoldingSummary } | null => {
         const precomputedFoldingInfoIndex = options.getSummaryIndex();
@@ -126,6 +126,7 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
         const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight);
         const foldedElements = editorDom.querySelectorAll('.inline-folded');
         const currentFoldedLines = new Set<number>();
+        let visibleModelRanges: monaco.Range[] | undefined;
 
         foldedElements.forEach((foldedElement) => {
             const viewLine = foldedElement.closest('.view-line') as HTMLElement | null;
@@ -156,16 +157,22 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
                 if (!lineNumber && viewLinesRect) {
                     const foldedRect = foldedElement.getBoundingClientRect();
                     const elementY = foldedRect.top + foldedRect.height / 2 - viewLinesRect.top;
-                    for (let line = visibleRange.start; line <= visibleRange.end; line++) {
-                        try {
-                            const lineTop = editor.getTopForLineNumber(line);
-                            if (elementY >= lineTop && elementY < lineTop + lineHeight) {
-                                lineNumber = line;
-                                break;
+                    // Visible ranges exclude folded interiors. Their combined
+                    // min/max can span a million hidden lines after level folding.
+                    visibleModelRanges ??= editor.getVisibleRanges();
+                    for (const range of visibleModelRanges) {
+                        for (let line = range.startLineNumber; line <= range.endLineNumber; line++) {
+                            try {
+                                const lineTop = editor.getTopForLineNumber(line);
+                                if (elementY >= lineTop && elementY < lineTop + lineHeight) {
+                                    lineNumber = line;
+                                    break;
+                                }
+                            } catch {
+                                continue;
                             }
-                        } catch {
-                            continue;
                         }
+                        if (lineNumber) break;
                     }
                 }
             } catch {
@@ -310,21 +317,16 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
 
     const editorDom = editor.getContainerDomNode();
     let foldingDomObserver: MutationObserver | null = null;
-    let isFoldingDomObserverActive = false;
+    let observedViewLines: Element | null = null;
 
     const syncFoldingDomObserverState = () => {
-        if (!editorDom) return;
         const model = getActiveModel();
-        if (!model || model.isDisposed()) {
-            if (isFoldingDomObserverActive) {
-                foldingDomObserver?.disconnect();
-                isFoldingDomObserverActive = false;
-            }
-            return;
-        }
-        const shouldObserve = !model.isDisposed() && model.getLineCount() <= options.domObserverMaxLines;
+        const viewLines = model && !model.isDisposed() ? editorDom?.querySelector('.view-lines') ?? null : null;
+        if (viewLines === observedViewLines) return;
+        foldingDomObserver?.disconnect();
+        observedViewLines = viewLines;
 
-        if (shouldObserve && !isFoldingDomObserverActive) {
+        if (viewLines) {
             if (!foldingDomObserver) {
                 foldingDomObserver = new MutationObserver((mutations) => {
                     const hasFoldingChange = mutations.some((mutation) => {
@@ -349,20 +351,16 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
                     }
                 });
             }
-            foldingDomObserver.observe(editorDom, {
+            // Monaco only renders viewport rows here, even for million-line
+            // models. Keep observing late token/fold redraws without observing
+            // the entire editor or disabling summaries for large documents.
+            foldingDomObserver.observe(viewLines, {
                 childList: true,
                 subtree: true,
                 attributes: true,
                 attributeFilter: ['class'],
                 attributeOldValue: true,
             });
-            isFoldingDomObserverActive = true;
-            return;
-        }
-
-        if (!shouldObserve && isFoldingDomObserverActive) {
-            foldingDomObserver?.disconnect();
-            isFoldingDomObserverActive = false;
         }
     };
 
@@ -384,21 +382,18 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
 
     syncFoldingDomObserverState();
 
-    editorDom?.addEventListener(
-        'click',
-        (e) => {
-            const model = getActiveModel();
-            if (!model || model.isDisposed()) {
-                return;
-            }
-            const target = e.target as Element;
-            const isFoldingClick = target.closest('.folding, .codicon-folding-expanded, .codicon-folding-collapsed, .inline-folded');
-            if (isFoldingClick) {
-                scheduleImmediateUpdate();
-            }
-        },
-        true,
-    );
+    const onFoldingClick = (e: Event) => {
+        const model = getActiveModel();
+        if (!model || model.isDisposed()) {
+            return;
+        }
+        const target = e.target as Element;
+        const isFoldingClick = target.closest('.folding, .codicon-folding-expanded, .codicon-folding-collapsed, .inline-folded');
+        if (isFoldingClick) {
+            scheduleImmediateUpdate();
+        }
+    };
+    editorDom?.addEventListener('click', onFoldingClick, true);
 
     let scrollRafId: number | null = null;
     let scrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -461,6 +456,19 @@ export const setupJsonFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCod
 
     editor.onDidChangeHiddenAreas(() => {
         scheduleImmediateUpdate();
+    });
+
+    editor.onDidDispose(() => {
+        disposed = true;
+        foldingDomObserver?.disconnect();
+        observedViewLines = null;
+        editorDom?.removeEventListener('click', onFoldingClick, true);
+        if (disableUpdateTimeout) clearTimeout(disableUpdateTimeout);
+        if (updateTimer) clearTimeout(updateTimer);
+        if (scrollTimer) clearTimeout(scrollTimer);
+        if (immediateUpdateRafId) cancelAnimationFrame(immediateUpdateRafId);
+        if (scrollRafId) cancelAnimationFrame(scrollRafId);
+        clearInfoElements();
     });
 
     (editor as any).__disableFoldingInfoUpdate = disableUpdate;

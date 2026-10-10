@@ -166,6 +166,13 @@
                     </template>
                     <div class="settings-collapse-content">
                         <div class="settings-switch-grid">
+                            <div v-if="!isDiffMode" class="switch-card">
+                                <div class="switch-card-head">
+                                    <span class="switch-card-title">{{ repairOnFormatModel ? settingsTxt.repairSettingTitleOn : settingsTxt.repairSettingTitleOff }}</span>
+                                    <el-switch class="switch-card-toggle" v-model="repairOnFormatModel" />
+                                </div>
+                                <span class="switch-card-desc">{{ settingsTxt.repairSettingDesc }}</span>
+                            </div>
                             <!-- 自动解码 -->
                             <div class="switch-card">
                                 <div class="switch-card-head">
@@ -315,6 +322,19 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton, ElCheckbox, ElCollapse, ElCollapseItem, ElDialog, ElIcon, ElOption, ElRadio, ElRadioGroup, ElSelect, ElSwitch } from 'element-plus';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/checkbox/style/css';
+import 'element-plus/es/components/collapse/style/css';
+import 'element-plus/es/components/collapse-item/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/icon/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/radio/style/css';
+import 'element-plus/es/components/radio-group/style/css';
+import 'element-plus/es/components/select/style/css';
+import 'element-plus/es/components/switch/style/css';
+
 import { computed } from 'vue';
 import { Document, Edit, Refresh, Setting, Sort } from '@element-plus/icons-vue';
 import type { SettingsTxt } from './utils/i18n';
@@ -336,6 +356,7 @@ interface Props {
     showMinimap: boolean;
     encodingMode: boolean;
     arrayNewLine: boolean;
+    repairOnFormat: boolean;
     recursiveUnescape: boolean;
     sortMethod: SortMethod;
     sortOrder: SortOrder;
@@ -359,6 +380,7 @@ const emit = defineEmits<{
     'update:showMinimap': [value: boolean];
     'update:encodingMode': [value: boolean];
     'update:arrayNewLine': [value: boolean];
+    'update:repairOnFormat': [value: boolean];
     'update:recursiveUnescape': [value: boolean];
     'update:sortMethod': [value: SortMethod];
     'update:sortOrder': [value: SortOrder];
@@ -390,6 +412,7 @@ const stickyScrollModel = createModel('stickyScroll');
 const showMinimapModel = createModel('showMinimap');
 const encodingModeModel = createModel('encodingMode');
 const arrayNewLineModel = createModel('arrayNewLine');
+const repairOnFormatModel = createModel('repairOnFormat');
 const recursiveUnescapeModel = createModel('recursiveUnescape');
 const sortMethodModel = createModel('sortMethod');
 const sortOrderModel = createModel('sortOrder');
@@ -768,11 +791,9 @@ const sortMethodDynamicDesc = computed(() => {
     font-size: 12px;
     color: #909399;
     line-height: 1.55;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
     min-height: calc(12px * 1.55 * 2);
 }
 
@@ -788,8 +809,7 @@ const sortMethodDynamicDesc = computed(() => {
     flex-shrink: 0;
 }
 
-/* 排序方式下拉框：固定宽度，避免 head 太挤；
-   英文 "Sort by field value" 较长，需要 180px 才能完整显示 */
+/* 排序方式下拉框固定宽度，为标题预留空间；选项使用简短文案。 */
 .switch-card-select {
     width: 180px;
     flex-shrink: 0;

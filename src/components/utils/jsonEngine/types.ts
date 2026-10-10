@@ -1,22 +1,3 @@
-export type JsonEngineMode = 'strict-json' | 'compatible';
-
-export type SlashEscapeMode = 'normalize' | 'preserve' | 'html-safe';
-
-export interface JsonEngineOptions {
-    mode: JsonEngineMode;
-    indentSize: number;
-    arrayNewLine: boolean;
-    preserveNumberLiterals: boolean;
-    preserveUnicodeEscapes: boolean;
-    decodeEncoding: boolean;
-    slashEscapeMode: SlashEscapeMode;
-}
-
-export interface JsonParseOptions {
-    preserveNumberLiterals?: boolean;
-    encodingMode?: boolean;
-}
-
 export interface JsonParseResult {
     data: any;
     escapeMap: Map<string, string>;
@@ -32,4 +13,8 @@ export interface JsonFormatterOptions {
 
 export interface JsonFormatResult extends JsonParseResult {
     formatted: string;
+}
+
+export class JsonInputParseError extends SyntaxError {
+    constructor(message: string) { super(message); this.name = 'JsonInputParseError'; }
 }

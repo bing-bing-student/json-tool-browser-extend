@@ -4,20 +4,21 @@
         <!-- 顶部 header 行 -->
         <div class="diff-row diff-header-row">
             <div class="diff-cell diff-cell-left diff-header-cell">
+                <span v-if="comparison" class="repair-side-label">{{ settingsTxt.repairOriginal }}</span>
                 <div class="panel-actions diff-panel-actions">
-                    <el-button @click="diffMode.diffFormatJSON('left')" size="small" type="primary" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffFormatJSON('left')" size="small" type="primary" plain>
                         <span>{{ settingsTxt.diffPanelFormat }}</span>
                     </el-button>
-                    <el-button @click="diffMode.diffSortJSON('left')" size="small" type="primary" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffSortJSON('left')" size="small" type="primary" plain>
                         <span>{{ settingsTxt.diffPanelSort }}</span>
                     </el-button>
                     <el-button @click="diffMode.diffCopy('left')" size="small" type="success" plain>
                         <span>{{ settingsTxt.diffPanelCopy }}</span>
                     </el-button>
-                    <el-button @click="diffMode.diffClear('left')" size="small" type="danger" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffClear('left')" size="small" type="danger" plain>
                         <span>{{ settingsTxt.diffPanelClear }}</span>
                     </el-button>
-                    <el-upload class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :on-change="diffMode.diffHandleUpload('left')">
+                    <el-upload v-if="!comparison" class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :on-change="diffMode.diffHandleUpload('left')">
                         <el-button size="small" type="info" plain>
                             <span>{{ settingsTxt.diffPanelUpload }}</span>
                         </el-button>
@@ -29,20 +30,21 @@
             </div>
             <div class="diff-cell diff-cell-center diff-header-cell"></div>
             <div class="diff-cell diff-cell-right diff-header-cell">
+                <span v-if="comparison" class="repair-side-label">{{ settingsTxt.repairResult }}</span>
                 <div class="panel-actions diff-panel-actions">
-                    <el-button @click="diffMode.diffFormatJSON('right')" size="small" type="primary" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffFormatJSON('right')" size="small" type="primary" plain>
                         <span>{{ settingsTxt.diffPanelFormat }}</span>
                     </el-button>
-                    <el-button @click="diffMode.diffSortJSON('right')" size="small" type="primary" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffSortJSON('right')" size="small" type="primary" plain>
                         <span>{{ settingsTxt.diffPanelSort }}</span>
                     </el-button>
                     <el-button @click="diffMode.diffCopy('right')" size="small" type="success" plain>
                         <span>{{ settingsTxt.diffPanelCopy }}</span>
                     </el-button>
-                    <el-button @click="diffMode.diffClear('right')" size="small" type="danger" plain>
+                    <el-button v-if="!comparison" @click="diffMode.diffClear('right')" size="small" type="danger" plain>
                         <span>{{ settingsTxt.diffPanelClear }}</span>
                     </el-button>
-                    <el-upload class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :on-change="diffMode.diffHandleUpload('right')">
+                    <el-upload v-if="!comparison" class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :on-change="diffMode.diffHandleUpload('right')">
                         <el-button size="small" type="info" plain>
                             <span>{{ settingsTxt.diffPanelUpload }}</span>
                         </el-button>
@@ -61,7 +63,7 @@
             </div>
             <div class="diff-cell diff-cell-center diff-sync-panel">
                 <div
-                    v-for="btn in diffMode.diffSyncButtons.value"
+                    v-for="btn in (comparison ? [] : diffMode.diffSyncButtons.value)"
                     :key="btn.changeIndex"
                     class="diff-sync-btn-group"
                     :class="{ 'is-active': btn.changeIndex === diffMode.activeDiffIndex.value }"
@@ -103,12 +105,16 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton, ElUpload } from 'element-plus';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/upload/style/css';
+
 import { computed, inject, onMounted, type ComponentPublicInstance } from 'vue';
 
 import { DIFF_MODE_INJECTION_KEY, type UseDiffModeReturn } from './composables/useDiffMode';
 import type { SettingsTxt } from './utils/i18n';
 
-const props = defineProps<{ settingsTxt: SettingsTxt }>();
+const props = defineProps<{ settingsTxt: SettingsTxt; comparison?: boolean }>();
 const settingsTxt = computed(() => props.settingsTxt);
 
 const injected = inject(DIFF_MODE_INJECTION_KEY);
@@ -132,12 +138,12 @@ onMounted(() => {
 </script>
 
 <style>
+.repair-side-label { margin-right: auto; padding: 0 12px; font-weight: 600; white-space: nowrap; }
+
 /* Diff 颜色变量：亮色保持清晰语义，暗色收敛到石墨灰体系内，避免占位块像浅色贴片。 */
 .json-tool-root {
     --json-tool-diff-delete-bg: rgba(215, 58, 73, 0.11);
     --json-tool-diff-insert-bg: rgba(102, 184, 255, 0.16);
-    --json-tool-diff-delete-margin: rgba(215, 58, 73, 0.4);
-    --json-tool-diff-insert-margin: rgba(84, 165, 240, 0.52);
     --json-tool-diff-inline-delete: rgba(215, 58, 73, 0.26);
     --json-tool-diff-inline-insert: rgba(102, 184, 255, 0.34);
     --json-tool-diff-spacer-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
@@ -155,8 +161,6 @@ onMounted(() => {
 .json-tool-root.theme-dark {
     --json-tool-diff-delete-bg: rgba(102, 58, 60, 0.26);
     --json-tool-diff-insert-bg: rgba(56, 88, 132, 0.24);
-    --json-tool-diff-delete-margin: rgba(184, 86, 92, 0.78);
-    --json-tool-diff-insert-margin: rgba(104, 157, 219, 0.8);
     --json-tool-diff-inline-delete: rgba(134, 68, 72, 0.48);
     --json-tool-diff-inline-insert: rgba(63, 106, 164, 0.5);
     --json-tool-diff-spacer-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -321,16 +325,30 @@ onMounted(() => {
     background: var(--json-tool-diff-insert-bg);
 }
 
-.diff-editor-row .diff-line-delete-margin {
-    background: var(--json-tool-diff-delete-margin);
-    width: 3px !important;
-    margin-left: 2px;
+/* ---------------- 当前差异定位标记 ---------------- */
+.diff-editor-row .diff-navigation-marker {
+    width: 4px;
+    pointer-events: none;
+    overflow: hidden;
 }
 
-.diff-editor-row .diff-line-insert-margin {
-    background: var(--json-tool-diff-insert-margin);
-    width: 3px !important;
-    margin-left: 2px;
+.diff-editor-row .diff-navigation-marker-bar {
+    width: 100%;
+    height: 100%;
+    background: #409eff;
+    border-radius: 2px;
+}
+
+.json-tool-root.theme-dark .diff-navigation-marker-bar {
+    background: #79b8ff;
+}
+
+.diff-editor-row .diff-navigation-marker[data-side='left'] .diff-navigation-marker-bar {
+    background: #f56c6c;
+}
+
+.json-tool-root.theme-dark .diff-navigation-marker[data-side='left'] .diff-navigation-marker-bar {
+    background: #ff8a8a;
 }
 
 /* ---------------- 行内字符级差异高亮 ---------------- */
@@ -351,28 +369,37 @@ onMounted(() => {
     width: 100%;
     box-sizing: border-box;
     box-shadow: var(--json-tool-diff-spacer-shadow);
+    /* Keep the hatch in the content area and a plain diff color under the track. */
+    background-size:
+        calc(100% - var(--json-tool-diff-scrollbar-width, 0px)) 100%,
+        calc(100% - var(--json-tool-diff-scrollbar-width, 0px)) 100%,
+        var(--json-tool-diff-scrollbar-width, 0px) 100%;
+    background-position: left top, left top, right top;
+    background-repeat: no-repeat;
 }
 
 .diff-editor-row .diff-view-zone-spacer-left {
-    background-color: var(--json-tool-diff-spacer-delete-bg);
     background-image: repeating-linear-gradient(
         -45deg,
         var(--json-tool-diff-spacer-delete-stripe) 0,
         var(--json-tool-diff-spacer-delete-stripe) 2px,
         transparent 2px,
         transparent 9px
-    );
+    ),
+    linear-gradient(var(--json-tool-diff-spacer-delete-bg), var(--json-tool-diff-spacer-delete-bg)),
+    linear-gradient(var(--json-tool-diff-delete-bg), var(--json-tool-diff-delete-bg));
 }
 
 .diff-editor-row .diff-view-zone-spacer-right {
-    background-color: var(--json-tool-diff-spacer-insert-bg);
     background-image: repeating-linear-gradient(
         -45deg,
         var(--json-tool-diff-spacer-insert-stripe) 0,
         var(--json-tool-diff-spacer-insert-stripe) 2px,
         transparent 2px,
         transparent 9px
-    );
+    ),
+    linear-gradient(var(--json-tool-diff-spacer-insert-bg), var(--json-tool-diff-spacer-insert-bg)),
+    linear-gradient(var(--json-tool-diff-insert-bg), var(--json-tool-diff-insert-bg));
 }
 
 /* ---------------- 底部 status 行 ---------------- */

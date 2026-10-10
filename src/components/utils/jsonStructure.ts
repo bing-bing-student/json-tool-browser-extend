@@ -38,11 +38,6 @@ export const calculateJsonStructure = (obj: any, mode: 'depth' | 'level' = 'dept
     return maxValue;
 };
 
-// 获取对象深度
-export const getObjectDepth = (obj: any, depth: number = 0): number => {
-    return calculateJsonStructure(obj, 'depth', depth);
-};
-
 // 计算 JSON 的最大层级
 export const calculateMaxLevel = (obj: any, currentLevel: number = 1): number => {
     return calculateJsonStructure(obj, 'level', currentLevel);

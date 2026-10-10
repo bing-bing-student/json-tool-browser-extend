@@ -204,7 +204,7 @@
                                                 :debounce="100"
                                                 :fit-input-width="true"
                                                 popper-class="field-path-autocomplete"
-                                                @select="(item: PathSuggestion) => handleFieldPathSelect(item, pathIndex)"
+                                                @select="(item: Record<string, any>) => handleFieldPathSelect(item, pathIndex)"
                                                 @input="(value: string | number) => handleFieldPathInput(String(value), pathIndex)"
                                                 @keyup.enter="(event: KeyboardEvent) => handleFieldPathEnter(event, pathIndex)">
                                                 <template #default="{ item }">
@@ -392,10 +392,23 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert, ElAutocomplete, ElButton, ElCollapseTransition, ElDialog, ElEmpty, ElIcon, ElInput, ElInputNumber, ElMessageBox, ElOption, ElSelect } from 'element-plus';
+import 'element-plus/es/components/alert/style/css';
+import 'element-plus/es/components/autocomplete/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/collapse-transition/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/empty/style/css';
+import 'element-plus/es/components/icon/style/css';
+import 'element-plus/es/components/input/style/css';
+import 'element-plus/es/components/input-number/style/css';
+import 'element-plus/es/components/message-box/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/select/style/css';
+
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import JSON5 from 'json5';
 import { showMessageError, showMessageSuccess, showMessageWarning } from '@/utils/jsonToolMessage';
-import { ElMessageBox } from 'element-plus';
 import { Plus, Delete, DocumentAdd, FolderOpened, ArrowRight, Warning } from '@element-plus/icons-vue';
 
 // Props

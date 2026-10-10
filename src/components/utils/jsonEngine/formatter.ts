@@ -1,4 +1,5 @@
 import JSON5 from 'json5';
+import { JsonInputParseError } from './types';
 
 import { smartDecode } from '../decode';
 import { createHighPrecisionNumberWrapper, normalizeJsonNumberLiteral, tryParseHighPrecisionWrapper, tryReadHighPrecisionWrapperObject } from './numberLiteral';
@@ -359,7 +360,8 @@ export class JsonPlusFormatter {
             }
             return { data, escapeMap };
         } catch (error) {
-            throw new Error('JSON5 解析失败: ' + (error as Error).message);
+            if (!(error instanceof SyntaxError)) throw error;
+            throw new JsonInputParseError('JSON5 解析失败: ' + error.message);
         }
     }
 
@@ -508,7 +510,7 @@ export class JsonPlusFormatter {
     }
 
     // 预处理字符串，处理非法转义和注释
-    private preprocessString(input: string, escapeMap: Map<string, string>): string {
+    private preprocessString(input: string, escapeMap: Map<string, string>, forRepair = false): string {
         let result = '';
         let i = 0;
 
@@ -517,15 +519,18 @@ export class JsonPlusFormatter {
             const nextChar = input[i + 1] || '';
 
             // 处理注释
-            if (char === '/' && nextChar === '/') {
+            if (char === '/' && nextChar === '/' && (!forRepair || input[i - 1] !== ':')) {
                 // 单行注释 //
+                const start = i;
                 i += 2;
                 while (i < input.length && input[i] !== '\n') {
                     i++;
                 }
+                if (forRepair) result += input.slice(start, i);
                 continue;
             } else if (char === '/' && nextChar === '*') {
                 // 多行注释 /* */
+                const start = i;
                 i += 2;
                 while (i < input.length - 1) {
                     if (input[i] === '*' && input[i + 1] === '/') {
@@ -534,13 +539,16 @@ export class JsonPlusFormatter {
                     }
                     i++;
                 }
+                if (forRepair) result += input.slice(start, i);
                 continue;
             } else if (char === '#') {
                 // # 单行注释（扩展支持）
+                const start = i;
                 i++;
                 while (i < input.length && input[i] !== '\n') {
                     i++;
                 }
+                if (forRepair) result += '//' + input.slice(start + 1, i);
                 continue;
             }
 
@@ -582,6 +590,12 @@ export class JsonPlusFormatter {
                                     }
                                     continue;
                                 }
+                            }
+
+                            if (forRepair && quote === "'" && nextChar === "'") {
+                                stringContent += "\\'";
+                                i += 2;
+                                continue;
                             }
 
                             // 对于非标准转义
@@ -648,6 +662,32 @@ export class JsonPlusFormatter {
         }
 
         return result;
+    }
+
+    // Repair uses the same escape policy as normal formatting, but leaves comments for the repair parser.
+    prepareRepairInput(input: string): { text: string; escapeMap: Map<string, string> } {
+        this.prepareEscapePlaceholders(input);
+        const escapeMap = new Map<string, string>();
+        if (!/[\\#]/.test(input)) return { text: input, escapeMap };
+        return { text: this.preprocessString(input, escapeMap, true), escapeMap };
+    }
+
+    restoreRepairEscapes(input: string, escapeMap: Map<string, string>): string {
+        if (!escapeMap.size) return input;
+        // All placeholders share a collision-checked prefix. One pass, not N full-string replacements.
+        const prefix = this.escapePlaceholderPrefix;
+        const parts: string[] = [];
+        let start = 0, pos = input.indexOf(prefix);
+        while (pos >= 0) {
+            const formatted = this.formatEscapePlaceholderAt(input, pos, escapeMap);
+            if (formatted) {
+                parts.push(input.slice(start, pos), formatted.text);
+                start = pos + formatted.length;
+            }
+            pos = input.indexOf(prefix, formatted ? start : pos + prefix.length);
+        }
+        parts.push(input.slice(start));
+        return parts.join('');
     }
 
     // 格式化输出

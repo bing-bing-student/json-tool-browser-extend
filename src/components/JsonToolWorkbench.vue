@@ -23,7 +23,7 @@
 
                 <!-- Diff 模式工具栏 -->
                 <div v-if="diffMode.isDiffMode.value" class="tool-bar diff-tool-bar">
-                    <el-button type="info" class="settings-tool-button" @click="openSettingsDialog">
+                    <el-button type="info" class="settings-tool-button" :disabled="repair.repairing.value" @click="openSettingsDialog">
                         <el-icon><Setting /></el-icon>
                     </el-button>
                     <div class="diff-nav-group">
@@ -37,7 +37,9 @@
                                 <span>{{ settingsTxt.diffPrev }}</span>
                             </button>
                             <span class="diff-nav-status">
-                                {{ settingsTxt.diffCountSummary(diffMode.activeDiffIndex.value, diffMode.diffCount.value) }}
+                                <template v-if="comparisonMode && comparisonLoading">{{ settingsTxt.repairCompareLoading }}</template>
+                                <template v-else-if="comparisonMode && diffMode.comparisonBusy.value">{{ settingsTxt.repairDiffWorking }}</template>
+                                <template v-else>{{ settingsTxt.diffCountSummary(diffMode.activeDiffIndex.value, diffMode.diffCount.value) }}</template>
                             </span>
                             <button
                                 type="button"
@@ -49,45 +51,45 @@
                             </button>
                         </div>
                     </div>
-                    <el-button type="info" @click="diffMode.exitDiffMode">{{ settingsTxt.diffExit }}</el-button>
+                    <el-button type="info" @click="exitComparisonMode">{{ settingsTxt.diffExit }}</el-button>
                 </div>
 
                 <!-- 普通模式工具栏 -->
                 <div v-else class="tool-bar" ref="toolBarRef" @scroll="handleToolBarScroll">
-                    <el-button type="info" class="settings-tool-button" @click="openSettingsDialog">
+                    <el-button type="info" class="settings-tool-button" :disabled="repair.repairing.value" @click="openSettingsDialog">
                         <el-icon>
                             <Setting />
                         </el-icon>
                     </el-button>
 
                     <!-- 演示模式下，除"设置"按钮外的所有功能暂时禁用，避免用户误操作打断引导流程 -->
-                    <div class="toolbar-actions" :class="{ 'demo-locked-area': isDemoMode }">
+                    <div class="toolbar-actions" :class="{ 'demo-locked-area': isDemoMode }" :inert="repair.repairing.value">
                         <el-button-group class="main-action-group">
-                            <el-button v-if="buttonVisibility.format" type="primary" @click="formatJSON">
+                            <el-button v-if="buttonVisibility.format" class="json-format-button" type="primary" :loading="repair.showLoading.value" :disabled="repair.repairing.value" :aria-busy="repair.repairing.value" @click="formatJSON">
                                 {{ settingsTxt.toolFormat }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.compress" type="primary" @click="compressJSON">
+                            <el-button v-if="buttonVisibility.compress" type="primary" :disabled="repair.repairing.value" @click="compressJSON">
                                 {{ settingsTxt.toolCompress }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.escape" type="primary" @click="compressAndEscapeJSON">
+                            <el-button v-if="buttonVisibility.escape" type="primary" :disabled="repair.repairing.value" @click="compressAndEscapeJSON">
                                 {{ settingsTxt.toolEscape }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.unescape" type="primary" @click="handleEscapeCommand('unescape')">
+                            <el-button v-if="buttonVisibility.unescape" type="primary" :disabled="repair.repairing.value" @click="handleEscapeCommand('unescape')">
                                 {{ settingsTxt.toolUnescape }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.masking" type="primary" @click="openDataMaskingDialog">
+                            <el-button v-if="buttonVisibility.masking" type="primary" :disabled="repair.repairing.value" @click="openDataMaskingDialog">
                                 {{ settingsTxt.toolMasking }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.sort" type="primary" @click="handleAdvancedCommand('sort')">
+                            <el-button v-if="buttonVisibility.sort" type="primary" :disabled="repair.repairing.value" @click="handleAdvancedCommand('sort')">
                                 {{ settingsTxt.toolSort }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.archive" type="primary" @click="handleSaveArchive">
+                            <el-button v-if="buttonVisibility.archive" type="primary" :disabled="repair.repairing.value" @click="handleSaveArchive">
                                 {{ settingsTxt.toolArchive }}
                             </el-button>
-                            <el-button v-if="buttonVisibility.diff" type="primary" @click="diffMode.enterDiffMode">{{ settingsTxt.toolDiff }}</el-button>
+                            <el-button v-if="buttonVisibility.diff" type="primary" :disabled="repair.repairing.value" @click="diffMode.enterDiffMode">{{ settingsTxt.toolDiff }}</el-button>
 
-                            <el-dropdown v-if="buttonVisibility.dataConvert" class="data-convert-dropdown" trigger="click" @command="handleConvert">
-                                <el-button type="primary">
+                            <el-dropdown v-if="buttonVisibility.dataConvert" class="data-convert-dropdown" trigger="click" :disabled="repair.repairing.value" @command="handleConvert">
+                                <el-button type="primary" :disabled="repair.repairing.value">
                                     {{ settingsTxt.toolDataConvert }}
                                     <el-icon class="el-icon--right">
                                         <ArrowDown />
@@ -113,7 +115,7 @@
                                 :placeholder="settingsTxt.levelPlaceholder"
                                 :class="['level-select', { 'level-select-en': props.locale === 'en' }]"
                                 :popper-class="props.locale === 'en' ? 'level-select-dropdown level-select-dropdown-en' : 'level-select-dropdown'"
-                                :disabled="maxLevel === 0">
+                                :disabled="repair.repairing.value || maxLevel === 0">
                                 <el-option v-if="maxLevel === 0" :label="settingsTxt.levelLabel(0)" :value="0" :disabled="true" />
                                 <el-option v-for="n in maxLevel" :key="n" :label="getFoldLevelOptionLabel(n)" :value="n" :disabled="isFoldLevelDisabled(n)" />
                             </el-select>
@@ -122,7 +124,7 @@
                                 class="level-action-button"
                                 :class="{ 'level-action-button-disabled-by-level': isSelectedFoldLevelDisabled }"
                                 @click="handleLevelAction"
-                                :disabled="maxLevel === 0 || isSelectedFoldLevelDisabled">
+                                :disabled="repair.repairing.value || maxLevel === 0 || isSelectedFoldLevelDisabled">
                                 {{ settingsTxt.collapse }}
                             </el-button>
                         </div>
@@ -138,7 +140,7 @@
             </div>
 
             <!-- Diff 模式编辑区域：拆分到 JsonToolDiffPane 子组件 -->
-            <JsonToolDiffPane v-if="diffMode.isDiffMode.value" :settings-txt="settingsTxt" />
+            <JsonToolDiffPane v-if="diffMode.isDiffMode.value" :settings-txt="settingsTxt" :comparison="comparisonMode" />
 
             <!-- 普通编辑区域 -->
             <div v-else ref="mainEditorContainer" class="editor-container">
@@ -232,14 +234,14 @@
                                 '--panel-actions-opacity': showInputActions ? 1 : 0,
                                 '--panel-actions-pointer-events': showInputActions ? 'auto' : 'none',
                             }">
-                            <el-button @click="clearInput(true)" size="small" type="danger" plain>
+                            <el-button @click="clearInput(true)" size="small" type="danger" plain :disabled="repair.repairing.value">
                                 <el-icon>
                                     <Delete />
                                 </el-icon>
                                 <span>{{ settingsTxt.panelClear }}</span>
                             </el-button>
-                            <el-upload class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :on-change="handleFileUpload">
-                                <el-button size="small" type="primary" plain>
+                            <el-upload class="upload-json" accept=".json" :auto-upload="false" :show-file-list="false" :disabled="repair.repairing.value" :on-change="handleFileUpload">
+                                <el-button size="small" type="primary" plain :disabled="repair.repairing.value">
                                     <el-icon>
                                         <Upload />
                                     </el-icon>
@@ -304,7 +306,7 @@
                     <el-button
                         class="transfer-button"
                         type="primary"
-                        :disabled="isDemoMode"
+                        :disabled="isDemoMode || repair.repairing.value"
                         @pointerdown.stop
                         @click.stop="transferToInput"
                         :aria-label="settingsTxt.transferToInput">
@@ -325,9 +327,7 @@
 
                 <div class="editor-panel editor-panel-output" :style="{ width: `${100 - leftPanelWidth}%` }">
                     <div class="panel-header" @dblclick="toggleOutputMaximize">
-                        <div class="panel-title">
-                            <span>{{ settingsTxt.panelPreview }}</span>
-                        </div>
+                        <div class="panel-title">{{ settingsTxt.panelPreview }}</div>
                         <div
                             class="panel-actions"
                             @dblclick.stop
@@ -335,7 +335,7 @@
                                 '--panel-actions-opacity': showOutputActions ? 1 : 0,
                                 '--panel-actions-pointer-events': showOutputActions ? 'auto' : 'none',
                             }">
-                            <el-button @click="copyOutput" size="small" type="success" plain>
+                            <el-button @click="copyOutput" size="small" type="success" plain :disabled="repair.repairing.value">
                                 <el-icon>
                                     <CopyDocument />
                                 </el-icon>
@@ -344,6 +344,7 @@
                             <el-button
                                 class="preview-download-button"
                                 @click="downloadOutput"
+                                :disabled="repair.repairing.value"
                                 size="small"
                                 type="info"
                                 plain>
@@ -367,25 +368,6 @@
                         <!-- 预览区域状态栏 -->
                         <div class="editor-status-bar editor-status-bar--output">
                             <span v-if="outputEditorStatus" class="status-text">{{ outputEditorStatus }}</span>
-                            <div class="status-action-menu" :aria-label="settingsTxt.statusMenuAria">
-                                <button
-                                    type="button"
-                                    class="status-action-button status-action-button--theme"
-                                    :title="settingsTxt.statusThemeSwitchTitle"
-                                    :aria-label="settingsTxt.statusThemeSwitchTitle"
-                                    @click="toggleThemeMode">
-                                    <svg v-if="themeMode === 'dark'" class="status-theme-icon status-theme-icon--sun" viewBox="0 0 24 24" aria-hidden="true">
-                                        <circle cx="12" cy="12" r="4.25" />
-                                        <path d="M12 2.5v2.25M12 19.25v2.25M4.75 4.75l1.6 1.6M17.65 17.65l1.6 1.6M2.5 12h2.25M19.25 12h2.25M4.75 19.25l1.6-1.6M17.65 6.35l1.6-1.6" />
-                                    </svg>
-                                    <svg v-else class="status-theme-icon status-theme-icon--moon" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path d="M20.2 14.45A7.65 7.65 0 0 1 9.55 3.8 8.2 8.2 0 1 0 20.2 14.45Z" />
-                                    </svg>
-                                </button>
-                                <button type="button" class="status-action-button" :title="settingsTxt.statusLanguageSwitchTitle" @click="switchJsonToolLocale">
-                                    {{ settingsTxt.statusLanguageSwitch }}
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -410,6 +392,13 @@
                 </div>
             </div>
         </div>
+
+        <JsonToolFloatingActions
+            :locale="props.locale"
+            :theme-mode="themeMode"
+            :dialog-open="settingsDialogVisible || dataMaskingDialogVisible || archiveNameDialogVisible || affixDialogVisible || fieldSortDialogVisible"
+            @toggle-theme="toggleThemeMode"
+            @switch-locale="switchJsonToolLocale" />
 
 
         <!-- 数据脱敏对话框 -->
@@ -442,6 +431,7 @@
             v-model:show-minimap="showMinimap"
             v-model:encoding-mode="encodingMode"
             v-model:array-new-line="arrayNewLine"
+            v-model:repair-on-format="repairOnFormat"
             v-model:recursive-unescape="recursiveUnescape"
             v-model:sort-method="sortMethod"
             v-model:sort-order="sortOrder"
@@ -482,153 +472,40 @@
             :execute-field-sort="executeFieldSort"
             :end-demo-mode="endDemoMode" />
 
-        <!-- 批量加 / 去前后缀对话框：前缀与后缀两组完全独立，同组 add/remove 通过单选互斥 -->
-        <el-dialog v-model="affixDialogVisible" width="460px" :close-on-click-modal="false" :show-close="false" custom-class="affix-dialog">
-            <template #header>
-                <div class="dialog-header-with-close">
-                    <span class="dialog-title-with-close">{{ settingsTxt.affixDialogTitle }}</span>
-                    <button class="demo-close-btn" @click="affixDialogVisible = false" :aria-label="settingsTxt.affixCloseAria">✕</button>
-                </div>
-            </template>
-
-            <div class="affix-panel">
-                <div class="affix-section">
-                    <div class="affix-row-head">
-                        <label class="affix-row-label">{{ settingsTxt.affixPrefixSection }}</label>
-                        <el-button-group class="affix-mode-group">
-                            <el-button
-                                size="small"
-                                :type="affixPrefixMode === 'add' ? 'primary' : 'default'"
-                                @click="affixPrefixMode = affixPrefixMode === 'add' ? 'none' : 'add'">
-                                {{ settingsTxt.affixModeAdd }}
-                            </el-button>
-                            <el-button
-                                size="small"
-                                :type="affixPrefixMode === 'remove' ? 'primary' : 'default'"
-                                @click="affixPrefixMode = affixPrefixMode === 'remove' ? 'none' : 'remove'">
-                                {{ settingsTxt.affixModeRemove }}
-                            </el-button>
-                        </el-button-group>
-                    </div>
-                    <el-input
-                        v-model="affixPrefixValue"
-                        class="affix-row-input"
-                        size="default"
-                        :disabled="affixPrefixMode === 'none'"
-                        :placeholder="affixPrefixMode === 'remove' ? settingsTxt.affixPrefixRemovePlaceholder : settingsTxt.affixPrefixAddPlaceholder"
-                        clearable />
-                </div>
-
-                <div class="affix-section">
-                    <div class="affix-row-head">
-                        <label class="affix-row-label">{{ settingsTxt.affixSuffixSection }}</label>
-                        <el-button-group class="affix-mode-group">
-                            <el-button
-                                size="small"
-                                :type="affixSuffixMode === 'add' ? 'primary' : 'default'"
-                                @click="affixSuffixMode = affixSuffixMode === 'add' ? 'none' : 'add'">
-                                {{ settingsTxt.affixModeAdd }}
-                            </el-button>
-                            <el-button
-                                size="small"
-                                :type="affixSuffixMode === 'remove' ? 'primary' : 'default'"
-                                @click="affixSuffixMode = affixSuffixMode === 'remove' ? 'none' : 'remove'">
-                                {{ settingsTxt.affixModeRemove }}
-                            </el-button>
-                        </el-button-group>
-                    </div>
-                    <el-input
-                        v-model="affixSuffixValue"
-                        class="affix-row-input"
-                        size="default"
-                        :disabled="affixSuffixMode === 'none'"
-                        :placeholder="affixSuffixMode === 'remove' ? settingsTxt.affixSuffixRemovePlaceholder : settingsTxt.affixSuffixAddPlaceholder"
-                        clearable />
-                </div>
-            </div>
-
-            <template #footer>
-                <el-button @click="affixDialogVisible = false">{{ settingsTxt.btnCancel }}</el-button>
-                <el-button type="primary" @click="applyBatchAffix">{{ settingsTxt.affixApply }}</el-button>
-            </template>
-        </el-dialog>
+        <BatchAffixDialog
+            v-if="affixDialogVisible"
+            v-model:visible="affixDialogVisible"
+            v-model:prefix-mode="affixPrefixMode"
+            v-model:suffix-mode="affixSuffixMode"
+            v-model:prefix-value="affixPrefixValue"
+            v-model:suffix-value="affixSuffixValue"
+            :settings-txt="settingsTxt"
+            @apply="applyBatchAffix" />
     </div>
 </template>
 
 <script setup lang="ts">
 // Vue
-import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted, nextTick, provide, getCurrentInstance, defineAsyncComponent } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, onUnmounted, nextTick, provide, defineAsyncComponent } from 'vue';
 
 // 第三方库
 import { parseTree, findNodeAtOffset, getNodePath, getLocation, type Node as JsonAstNode } from 'jsonc-parser';
 
-// Element Plus
-import {
-    ElAlert,
-    ElAutocomplete,
-    ElButton,
-    ElButtonGroup,
-    ElCheckbox,
-    ElCollapse,
-    ElCollapseItem,
-    ElCollapseTransition,
-    ElDialog,
-    ElDropdown,
-    ElDropdownItem,
-    ElDropdownMenu,
-    ElEmpty,
-    ElIcon,
-    ElInput,
-    ElInputNumber,
-    ElMessage,
-    ElMessageBox,
-    ElOption,
-    ElPopover,
-    ElRadio,
-    ElRadioButton,
-    ElRadioGroup,
-    ElSelect,
-    ElSwitch,
-    ElTable,
-    ElTableColumn,
-    ElTag,
-    ElUpload,
-} from 'element-plus';
+import { ElButton, ElButtonGroup, ElDropdown, ElDropdownItem, ElDropdownMenu, ElIcon, ElMessage, ElMessageBox, ElOption, ElSelect, ElUpload } from 'element-plus';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/button-group/style/css';
+import 'element-plus/es/components/dropdown/style/css';
+import 'element-plus/es/components/dropdown-item/style/css';
+import 'element-plus/es/components/dropdown-menu/style/css';
+import 'element-plus/es/components/icon/style/css';
+import 'element-plus/es/components/message/style/css';
+import 'element-plus/es/components/message-box/style/css';
+import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/select/style/css';
+import 'element-plus/es/components/upload/style/css';
+
 import type { UploadFile } from 'element-plus';
 import { Loading, ArrowLeft, ArrowRight, ArrowDown, ArrowUp, CopyDocument, Download, Upload, Delete, Setting, WarningFilled, Edit, Refresh } from '@element-plus/icons-vue';
-import 'element-plus/theme-chalk/base.css';
-import 'element-plus/theme-chalk/el-alert.css';
-import 'element-plus/theme-chalk/el-autocomplete.css';
-import 'element-plus/theme-chalk/el-button.css';
-import 'element-plus/theme-chalk/el-button-group.css';
-import 'element-plus/theme-chalk/el-checkbox.css';
-import 'element-plus/theme-chalk/el-collapse.css';
-import 'element-plus/theme-chalk/el-collapse-transition.css';
-import 'element-plus/theme-chalk/el-dialog.css';
-import 'element-plus/theme-chalk/el-dropdown.css';
-import 'element-plus/theme-chalk/el-dropdown-item.css';
-import 'element-plus/theme-chalk/el-dropdown-menu.css';
-import 'element-plus/theme-chalk/el-empty.css';
-import 'element-plus/theme-chalk/el-icon.css';
-import 'element-plus/theme-chalk/el-input.css';
-import 'element-plus/theme-chalk/el-input-number.css';
-import 'element-plus/theme-chalk/el-loading.css';
-import 'element-plus/theme-chalk/el-message.css';
-import 'element-plus/theme-chalk/el-message-box.css';
-import 'element-plus/theme-chalk/el-option.css';
-import 'element-plus/theme-chalk/el-overlay.css';
-import 'element-plus/theme-chalk/el-popover.css';
-import 'element-plus/theme-chalk/el-popper.css';
-import 'element-plus/theme-chalk/el-radio.css';
-import 'element-plus/theme-chalk/el-radio-button.css';
-import 'element-plus/theme-chalk/el-radio-group.css';
-import 'element-plus/theme-chalk/el-scrollbar.css';
-import 'element-plus/theme-chalk/el-select.css';
-import 'element-plus/theme-chalk/el-switch.css';
-import 'element-plus/theme-chalk/el-table.css';
-import 'element-plus/theme-chalk/el-tag.css';
-import 'element-plus/theme-chalk/el-tooltip.css';
-import 'element-plus/theme-chalk/el-upload.css';
 import { showMessageError, showMessageSuccess, showMessageWarning } from '@/utils/jsonToolMessage';
 
 // Monaco Editor
@@ -649,11 +526,14 @@ import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding.css';
 import 'monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess';
 import 'monaco-editor/esm/vs/language/json/monaco.contribution';
 
+const BatchAffixDialog = defineAsyncComponent(() => import('./BatchAffixDialog.vue'));
 const ArchiveNameDialog = defineAsyncComponent(() => import('./ArchiveNameDialog.vue'));
 const DataMaskingDialog = defineAsyncComponent(() => import('./DataMaskingDialog.vue'));
 const JsonToolDiffPane = defineAsyncComponent(() => import('./JsonToolDiffPane.vue'));
 const JsonSortFeature = defineAsyncComponent(() => import('./JsonSortFeature.vue'));
 const SettingsDialog = defineAsyncComponent(() => import('./SettingsDialog.vue'));
+
+import JsonToolFloatingActions from './JsonToolFloatingActions.vue';
 
 // 组合式函数
 import { useEditorContextMenu } from './composables/useEditorContextMenu';
@@ -670,6 +550,7 @@ import { useJsonToolSettingsDialog } from './composables/useJsonToolSettingsDial
 import { useMonacoLanguageRegistry } from './composables/useMonacoLanguageRegistry';
 import { useTabId } from './composables/useTabId';
 import { useTabLifecycle } from './composables/useTabLifecycle';
+import { useJsonRepair } from './composables/useJsonRepair';
 import { useToolSettings } from './composables/useToolSettings';
 
 // 本地工具
@@ -683,52 +564,20 @@ import {
     JSON_TOOL_UNSAFE_LONG_LINE_THRESHOLD,
     getJsonToolLongLineViewOptions,
 } from './utils/editorWordWrap';
+import { scheduleIdleTask } from './utils/idleTask';
 import { sortJsonForDiff } from './utils/jsonDiffSort';
 import { normalizeJsonNumberLiteral, restoreHighPrecisionInOutput, tryParseHighPrecisionWrapper, tryReadHighPrecisionWrapperObject, unwrapHighPrecisionForConvert } from './utils/jsonEngine';
 import { calculateMaxLevel, detectIllegalEscapes } from './utils/jsonStructure';
 import { unescapeJsonText, type JsonUnescapeMessageKind } from './utils/jsonUnescape';
 import { getJsonToolThemeForLanguage } from './utils/monacoThemes';
 import { ensureMonacoTextareaAttrs, type MonacoTextareaAttrObserver } from './utils/monacoTextareaAttrs';
+import { optimizeLargeEditorLineMapping } from './utils/largeEditorLineMapping';
+import { clearEditorContent } from './utils/clearEditorContent';
+import { getChangedLineRanges } from './utils/changedLineRanges';
+import type { JsonToolOutputType } from './utils/jsonToolLocaleTransition';
 
 const props = defineProps<{ locale?: 'zh' | 'en' }>();
 const emit = defineEmits<{ switchLocale: [] }>();
-
-const jsonToolApp = getCurrentInstance()?.appContext.app;
-if (jsonToolApp) {
-    [
-        ElAlert,
-        ElAutocomplete,
-        ElButton,
-        ElButtonGroup,
-        ElCheckbox,
-        ElCollapse,
-        ElCollapseItem,
-        ElCollapseTransition,
-        ElDialog,
-        ElDropdown,
-        ElDropdownItem,
-        ElDropdownMenu,
-        ElEmpty,
-        ElIcon,
-        ElInput,
-        ElInputNumber,
-        ElOption,
-        ElPopover,
-        ElRadio,
-        ElRadioButton,
-        ElRadioGroup,
-        ElSelect,
-        ElSwitch,
-        ElTable,
-        ElTableColumn,
-        ElTag,
-        ElUpload,
-    ].forEach((component) => {
-        if (component.name && !jsonToolApp.component(component.name)) {
-            jsonToolApp.component(component.name, component);
-        }
-    });
-}
 
 const settingsTxt = computed<SettingsTxt>(() => (props.locale === 'en' ? SETTINGS_TXT_EN : SETTINGS_TXT_ZH));
 const appendErrorDetail = (base: string, detail?: string): string => (detail ? `${base}: ${detail}` : base);
@@ -788,8 +637,7 @@ const LARGE_EDITOR_CHAR_THRESHOLD = 8 * 1024 * 1024;
 const JSON_PREVIEW_TOKENIZATION_MAX_LINES = 50000;
 const JSON_PREVIEW_TOKENIZATION_MAX_CHARS = LARGE_EDITOR_CHAR_THRESHOLD;
 const JSON_FOLDING_MAXIMUM_REGIONS = 10000000;
-const FOLDING_INFO_DOM_OBSERVER_MAX_LINES = LARGE_EDITOR_LINE_THRESHOLD;
-const outputType = ref<'json' | 'yaml' | 'toml' | 'xml' | 'go' | 'typescript' | 'text'>('json'); // 当前输出类型的状态
+const outputType = ref<JsonToolOutputType>('json'); // 当前输出类型的状态
 const maxLevel = ref(0); // 最大层级
 const inputContentLanguage = ref<EditorContentLanguage>('json');
 const maxFoldableLevel = ref<number | null>(null); // 编辑器当前实际可折叠的最大层级
@@ -871,6 +719,7 @@ const {
     wordWrap,
     fontSize,
     arrayNewLine,
+    repairOnFormat,
     preserveNumberLiterals,
     showMinimap,
     enableDiagnostics,
@@ -922,6 +771,58 @@ const jsonEngine = useJsonEngine({
     encodingMode,
 });
 
+const repair = useJsonRepair();
+let applyingFormatResult = false;
+const repairDiffToken = new URLSearchParams(window.location.search).get('repairDiff') || '';
+const comparisonMode = ref(Boolean(repairDiffToken));
+const comparisonLoading = ref(false);
+let comparisonLoadId = 0;
+const loadComparison = async () => {
+    const id = ++comparisonLoadId;
+    comparisonLoading.value = true;
+    diffMode.cancelComparison();
+    try {
+        const { loadRepairSnapshot } = await import('./utils/repairSnapshots');
+        const result = await loadRepairSnapshot(repairDiffToken, 'repair');
+        if (id !== comparisonLoadId || !comparisonMode.value || isTabPageClosing.value) return;
+        diffMode.getDiffLeftEditor()?.setValue(result.original);
+        diffMode.getDiffRightEditor()?.setValue(result.result);
+        diffMode.scheduleDiffRecompute();
+    } catch {
+        if (id === comparisonLoadId && comparisonMode.value && !isTabPageClosing.value) {
+            showMessageError(settingsTxt.value.repairCompareFailed);
+        }
+    } finally { if (id === comparisonLoadId) comparisonLoading.value = false; }
+};
+const exitComparisonMode = async () => {
+    if (comparisonMode.value) {
+        comparisonLoadId++;
+        // Keep audit mode active while exiting so the original snapshot is never saved as an ordinary Diff draft.
+        await diffMode.exitDiffMode();
+        diffMode.diffDraftLeftText.value = '';
+        diffMode.diffDraftRightText.value = '';
+        comparisonMode.value = false;
+        const url = new URL(window.location.href);
+        url.searchParams.delete('repairDiff');
+        history.replaceState(history.state, '', url);
+        return;
+    }
+    await diffMode.exitDiffMode();
+};
+const openRepairComparisonById = (comparisonId: string) => {
+    if (repair.repairing.value || !comparisonId || isTabPageClosing.value) return false;
+    const url = new URL(window.location.href);
+    url.searchParams.set('repairDiff', comparisonId);
+    // Open synchronously from the user's click; input and result are never included in the URL.
+    const tab = window.open(url.href, '_blank');
+    if (tab) {
+        tab.opener = null;
+        return true;
+    }
+    showMessageWarning(settingsTxt.value.repairPopupBlocked);
+    return false;
+};
+
 const themeRootClass = computed(() => (themeMode.value === 'dark' ? 'theme-dark' : 'theme-light'));
 
 watch(
@@ -955,7 +856,7 @@ const countLinesWithoutSplit = (text: string): number => {
 // Esc 退出 Diff，恢复普通编辑器。
 const handleEscapeKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && diffMode.isDiffMode.value) {
-        void diffMode.exitDiffMode();
+        void exitComparisonMode();
     }
 };
 
@@ -995,6 +896,7 @@ const getOutputEditorLanguage = () => {
 };
 
 const cacheNormalEditorsState = () => {
+    repair.cancel();
     normalModeInputSnapshot = inputEditor?.getValue() || '';
     normalModeOutputSnapshot = outputEditor?.getValue() || '';
     normalModeInputViewState = inputEditor?.saveViewState() || null;
@@ -1086,6 +988,8 @@ const restoreNormalEditors = async () => {
 // 工具函数 / 通知函数 / preprocessJSON / jsonEngine service 都在文件后段声明，
 // 这里全部用 lambda 包一层延迟绑定，避免 TDZ。
 const diffMode = useDiffMode({
+    exactComparison: comparisonMode,
+    onComparisonMounted: () => { void loadComparison(); },
     settingsTxt,
     locale: computed(() => props.locale),
     tabId,
@@ -1303,21 +1207,39 @@ const { inputHasContent, shouldShowFirstUseGuide, dismissFirstUseGuide, loadFirs
     formatJson: () => formatJSON(),
 });
 
+let tabInitialization: Promise<void> | null = null;
+let startupGcScheduled = false;
+let cancelStartupGc: (() => void) | null = null;
+
+const scheduleStartupGc = () => {
+    if (startupGcScheduled || isTabPageClosing.value) return;
+    startupGcScheduled = true;
+    cancelStartupGc = scheduleIdleTask(() => {
+        cancelStartupGc = null;
+        void tabInitialization?.then(() => {
+            if (!isTabPageClosing.value) return garbageCollectClosedTabs();
+        }).catch(() => { /* 非关键清理不阻塞编辑 */ });
+    });
+};
+
 onMounted(() => {
     setupTabIdChannel();
     setupTabGcChannel();
-    void (async () => {
+    tabInitialization = (async () => {
         await ensureUniqueTabIdForThisPage();
+        if (isTabPageClosing.value) return;
         // 启动心跳，让其他 tab 知道本 tab 还活着
         startTabHeartbeat();
-        // 启动后异步执行一次 GC：清理所有已关闭 tab 留下的存档与 diff 草稿
-        void garbageCollectClosedTabs();
-        await diffMode.loadDiffDraftSnapshot();
-        await loadArchives();
+        if (!comparisonMode.value) {
+            await diffMode.loadDiffDraftSnapshot();
+            await loadArchives();
+        }
     })();
 });
 
 onBeforeUnmount(() => {
+    cancelStartupGc?.();
+    cancelStartupGc = null;
     isTabPageClosing.value = true;
     stopTabHeartbeat();
     // 同步删除自己的 heartbeat，让其他 tab 启动 GC 时能立刻清理本 tab 数据
@@ -1411,7 +1333,6 @@ const {
     dropIndicatorIndex,
     archiveListRef,
     archiveSidebarWidth,
-    isArchiveResizing,
     loadArchives,
     saveArchives,
     getArchivesTotalSizeInfo,
@@ -1438,6 +1359,7 @@ let inputEditor: monaco.editor.IStandaloneCodeEditor | null = null; // 输入编
 let outputEditor: monaco.editor.IStandaloneCodeEditor | null = null; // 输出编辑器实例
 type LongLineEditorSide = 'input' | 'output';
 const longLineDetectionRevision: Record<LongLineEditorSide, number> = { input: 0, output: 0 };
+const longLineScannedModels: Record<LongLineEditorSide, monaco.editor.ITextModel | null> = { input: null, output: null };
 
 const syncLongLineWrapLock = () => {
     const shouldLock = inputHasUnsafeLongLine.value || outputHasUnsafeLongLine.value;
@@ -1461,42 +1383,56 @@ const setUnsafeLongLinePresence = (side: LongLineEditorSide, hasUnsafeLongLine: 
 
 // 大文件按时间片扫描，避免为了判断是否存在一条超长行而阻塞百万行文件的主线程。
 // 单行转义结果走同步快路径，因此会在 Monaco 首次渲染前立即开启保护。
-const scheduleUnsafeLongLineDetection = (side: LongLineEditorSide, editor: monaco.editor.IStandaloneCodeEditor | null) => {
+const scheduleUnsafeLongLineDetection = (side: LongLineEditorSide, editor: monaco.editor.IStandaloneCodeEditor | null, event?: monaco.editor.IModelContentChangedEvent) => {
     const revision = ++longLineDetectionRevision[side];
     const model = editor?.getModel();
     if (!model || model.isDisposed()) {
+        longLineScannedModels[side] = null;
         setUnsafeLongLinePresence(side, false);
         return;
     }
 
     if (model.getValueLength() <= JSON_TOOL_UNSAFE_LONG_LINE_THRESHOLD) {
+        longLineScannedModels[side] = model;
         setUnsafeLongLinePresence(side, false);
         return;
     }
 
     const lineCount = model.getLineCount();
     if (lineCount === 1) {
+        longLineScannedModels[side] = model;
         setUnsafeLongLinePresence(side, model.getLineLength(1) > JSON_TOOL_UNSAFE_LONG_LINE_THRESHOLD);
         return;
     }
 
-    let lineNumber = 1;
+    const hadUnsafeLine = side === 'input' ? inputHasUnsafeLongLine.value : outputHasUnsafeLongLine.value;
+    const canScanChanges = event && !event.isFlush && longLineScannedModels[side] === model && !hadUnsafeLine;
+    const ranges = canScanChanges ? getChangedLineRanges(event.changes, lineCount) : [{ start: 1, end: lineCount }];
+    longLineScannedModels[side] = null;
+    let rangeIndex = 0;
+    let lineNumber = ranges[0]?.start ?? lineCount + 1;
     const scanTimeSlice = () => {
         if (longLineDetectionRevision[side] !== revision || model.isDisposed() || editor?.getModel() !== model) return;
 
         const startedAt = performance.now();
         let inspected = 0;
-        while (lineNumber <= lineCount && inspected < 50000) {
+        while (rangeIndex < ranges.length && inspected < 50000) {
             if (model.getLineLength(lineNumber) > JSON_TOOL_UNSAFE_LONG_LINE_THRESHOLD) {
+                longLineScannedModels[side] = model;
                 setUnsafeLongLinePresence(side, true);
                 return;
             }
             lineNumber++;
+            if (lineNumber > ranges[rangeIndex].end) {
+                rangeIndex++;
+                lineNumber = ranges[rangeIndex]?.start ?? lineCount + 1;
+            }
             inspected++;
             if ((inspected & 1023) === 0 && performance.now() - startedAt >= 8) break;
         }
 
-        if (lineNumber > lineCount) {
+        if (rangeIndex >= ranges.length) {
+            longLineScannedModels[side] = model;
             setUnsafeLongLinePresence(side, false);
             return;
         }
@@ -1577,6 +1513,8 @@ const setOutputEditorValue = (
     customIndentSize?: number,
 ): boolean => {
     if (!outputEditor) return false;
+    // A different output action supersedes an ordinary asynchronous format operation.
+    if (!applyingFormatResult) { repair.cancel(); repair.comparisonId.value = ''; }
 
     const resolvedLanguage = language === 'text' ? 'plaintext' : language;
 
@@ -1786,7 +1724,12 @@ const handleUnsafeLongLineMouseDown = (event: MouseEvent, side: 'input' | 'outpu
     setUnsafeLongLinePresence(side, true);
 };
 
-const ensureProcessingFeatureAvailable = () => true;
+const ensureProcessingFeatureAvailable = () => {
+    if (repair.repairing.value) return false;
+    // Ordinary formatting has no waiting UI; a new processing action takes precedence.
+    repair.cancel();
+    return true;
+};
 
 const ensureCollapseFeatureAvailable = () => true;
 
@@ -2114,7 +2057,6 @@ const setupFoldingInfoDisplay = (editor: monaco.editor.IStandaloneCodeEditor) =>
     setupJsonFoldingInfoDisplay(editor, {
         getSummaryIndex: getFoldingSummaryIndex,
         getOutputType: () => outputType.value,
-        domObserverMaxLines: FOLDING_INFO_DOM_OBSERVER_MAX_LINES,
     });
 };
 const findStringRangeByAst = (model: monaco.editor.ITextModel, position: monaco.Position): monaco.Range | null => {
@@ -2792,6 +2734,7 @@ const { cancelPendingLevelAnalysis, destroyLevelAnalysisWorker, scheduleInputLev
     getOutputEditor: () => outputEditor,
     updateInputEditorConfig: (language) => updateInputEditorConfig(language),
     preprocessJson: (input) => preprocessJSON(input).data,
+    getParserOptions: () => jsonEngine.resolveOptions(),
     resetPrecomputedFoldingInfo,
     clearOutputFoldingInfo,
     clearOutputEditor: () => setOutputEditorValue('', 'json', true),
@@ -2904,12 +2847,12 @@ const createInputEditor = () => {
 
     const inputOptions = getEditorOptions(indentSize.value, false, inputContentLanguage.value, true, 1);
     inputEditor = monaco.editor.create(inputEditorContainer.value, inputOptions);
+    optimizeLargeEditorLineMapping(inputEditor);
     currentInputLineCount.value = getEditorLineCount(inputEditor);
 
     inputEditorTextareaAttrObserver?.disconnect();
     inputEditorTextareaAttrObserver = ensureMonacoTextareaAttrs(inputEditorContainer.value, 'monaco-input-editor');
 
-    const container = inputEditorContainer.value;
     nextTick(() => {
         inputEditorTextareaAttrObserver?.syncNow();
 
@@ -2934,6 +2877,7 @@ const createOutputEditor = () => {
     // 默认启用大文件折叠优化（因为是输出编辑器，通常会处理较大的JSON）
     const options = getEditorOptions(indentSize.value, true, 'json', true);
     outputEditor = monaco.editor.create(outputEditorContainer.value, options);
+    optimizeLargeEditorLineMapping(outputEditor);
     outputEditorTextareaAttrObserver?.disconnect();
     outputEditorTextareaAttrObserver = ensureMonacoTextareaAttrs(outputEditorContainer.value, 'monaco-output-editor');
     nextTick(() => {
@@ -3002,6 +2946,12 @@ const configureInputEditor: () => void = () => {
     // 监听输入变化
     let prevInputLineCount = getEditorLineCount(inputEditor);
     inputEditor.onDidChangeModel(() => {
+        cancelPendingLevelAnalysis();
+        if (repair.busy.value) {
+            const wasRepairing = repair.repairing.value;
+            repair.cancel();
+            if (wasRepairing) showMessageWarning(settingsTxt.value.repairInputChanged);
+        }
         scheduleUnsafeLongLineDetection('input', inputEditor);
         prevInputLineCount = getEditorLineCount(inputEditor);
         currentInputLineCount.value = prevInputLineCount;
@@ -3011,7 +2961,12 @@ const configureInputEditor: () => void = () => {
         debouncedUpdateInputLineNumberWidth();
     });
     inputEditor.onDidChangeModelContent((e) => {
-        scheduleUnsafeLongLineDetection('input', inputEditor);
+        if (repair.busy.value) {
+            const wasRepairing = repair.repairing.value;
+            repair.cancel();
+            if (wasRepairing) showMessageWarning(settingsTxt.value.repairInputChanged);
+        }
+        scheduleUnsafeLongLineDetection('input', inputEditor, e);
         const model = inputEditor?.getModel();
         const lineCount = getEditorLineCount(inputEditor);
         currentInputLineCount.value = lineCount;
@@ -3065,7 +3020,8 @@ const configureOutputEditor: () => void = () => {
         debouncedUpdateOutputLineNumberWidth();
     });
     outputEditor.onDidChangeModelContent((e) => {
-        scheduleUnsafeLongLineDetection('output', outputEditor);
+        if (!applyingFormatResult) { repair.cancel(); repair.comparisonId.value = ''; }
+        scheduleUnsafeLongLineDetection('output', outputEditor, e);
         const lineCount = getEditorLineCount(outputEditor);
         const isFullReplace = e.changes.some((change) => {
             const replacedLines = change.range.endLineNumber - change.range.startLineNumber + 1;
@@ -3177,6 +3133,7 @@ const initializeEditorLayout = () => {
 
     // 设置初始化成功标志
     editorsInitialized.value = true;
+    scheduleStartupGc();
 };
 
 // 设置窗口resize监听器
@@ -3336,7 +3293,13 @@ onMounted(async () => {
     // 初始化基础环境
     initializeMonacoEnvironment();
 
-    // 添加延迟确保DOM完全渲染
+    if (comparisonMode.value) {
+        diffMode.enterDiffMode();
+        markSettingsInitialized();
+        return;
+    }
+
+    // DOM 和样式就绪后的下一帧创建编辑器，避免固定等待时间。
     await nextTick();
     editorInitTimer = setTimeout(() => {
         void initializeNormalEditors();
@@ -3540,38 +3503,47 @@ const stringifyJsonValueForCurrentSettings = (
 };
 
 // 格式化 JSON
-const formatJSON = () => {
-    if (!ensureProcessingFeatureAvailable()) return;
+const formatJSON = async () => {
+    if (repair.busy.value || !ensureProcessingFeatureAvailable()) return;
+    const value = inputEditor?.getValue() || '';
+    if (!value.trim()) { showMessageError(settingsTxt.value.msgInputJsonRequired); return; }
+    const model = inputEditor?.getModel();
+    const version = model?.getVersionId();
     const startTime = performance.now();
-
     try {
+        const result = await repair.format(value, {
+            indentSize: indentSize.value, arrayNewLine: arrayNewLine.value,
+            preserveNumberLiterals: true, encodingMode: encodingMode.value,
+        }, repairOnFormat.value);
+        if (!result || inputEditor?.getModel() !== model || model?.getVersionId() !== version || isTabPageClosing.value) return;
         outputType.value = 'json';
-        const value = inputEditor?.getValue() || '';
-
-        if (!value.trim()) {
-            showMessageError(settingsTxt.value.msgInputJsonRequired);
-            return;
-        }
-
-        const startLineCount = currentInputLineCount.value || countLinesWithoutSplit(value);
-        const { formatted } = jsonEngine.formatInput(value);
-
-        setOutputEditorValue(formatted, 'json', true);
-
-        const elapsed = performance.now() - startTime;
-        if (startLineCount > 300000) {
-            showMessageSuccess(settingsTxt.value.msgFormatSuccessWithTime(elapsed.toFixed(0)));
+        applyingFormatResult = true;
+        try { setOutputEditorValue(result.formatted, 'json', true); } finally { applyingFormatResult = false; }
+        if (result.comparisonId) {
+            const comparisonId = result.comparisonId;
+            void ElMessageBox.confirm(settingsTxt.value.repairSuccessPrompt, settingsTxt.value.repairSuccessTitle, {
+                confirmButtonText: settingsTxt.value.repairViewDiff,
+                cancelButtonText: settingsTxt.value.repairSkip,
+                closeOnClickModal: false,
+                customClass: 'json-repair-success-dialog',
+                modalClass: 'json-repair-success-overlay',
+                beforeClose: (action, _instance, done) => {
+                    // Keep opening the comparison in the click's user gesture, before the exit animation.
+                    // If pop-ups are blocked, retain this sole Diff entry so the user can retry.
+                    if (action === 'confirm' && !openRepairComparisonById(comparisonId)) return;
+                    done();
+                },
+            }).catch(() => {});
         } else {
-            showMessageSuccess(settingsTxt.value.msgFormatSuccess);
+            const elapsed = performance.now() - startTime;
+            showMessageSuccess(currentInputLineCount.value > 300000
+                ? settingsTxt.value.msgFormatSuccessWithTime(elapsed.toFixed(0)) : settingsTxt.value.msgFormatSuccess);
         }
-
-        // 折叠信息预计算放到格式化完成之后；大文本会切到 Worker，避免阻塞编辑器交互。
-        if (shouldPrecomputeFoldingInfo(formatted.length)) {
-            schedulePrecomputeFoldingInfo(formatted, getFoldingInfoPrecomputeDelay(formatted.length)).catch(() => {});
-        } else {
-            clearOutputFoldingInfo();
-        }
+        if (shouldPrecomputeFoldingInfo(result.formatted.length)) {
+            schedulePrecomputeFoldingInfo(result.formatted, getFoldingInfoPrecomputeDelay(result.formatted.length)).catch(() => {});
+        } else clearOutputFoldingInfo();
     } catch (error: any) {
+        if (error?.name === 'AbortError') return;
         showMessageError(settingsTxt.value.msgFormatFail(error.message));
     }
 };
@@ -4408,15 +4380,7 @@ const clearInput = (showToast: boolean = true) => {
         if (inputEditor) {
             const model = inputEditor.getModel();
             if (model) {
-                const fullRange = model.getFullModelRange();
-                if (!fullRange.isEmpty()) {
-                    inputEditor.executeEdits('clear-input', [
-                        {
-                            range: fullRange,
-                            text: '',
-                        },
-                    ]);
-                }
+                clearEditorContent(inputEditor, 'clear-input');
 
                 // 延迟后再设置回JSON语言
                 setTimeout(() => {
@@ -4429,18 +4393,7 @@ const clearInput = (showToast: boolean = true) => {
 
         if (outputEditor) {
             clearOutputFoldingInfo();
-            const model = outputEditor.getModel();
-            if (model) {
-                const fullRange = model.getFullModelRange();
-                if (!fullRange.isEmpty()) {
-                    outputEditor.executeEdits('clear-output', [
-                        {
-                            range: fullRange,
-                            text: '',
-                        },
-                    ]);
-                }
-            }
+            clearEditorContent(outputEditor, 'clear-output');
             updateEditorHeight(outputEditor);
         }
 
@@ -4884,6 +4837,27 @@ const transferToInput = (e: MouseEvent) => {
 </script>
 
 <style scoped>
+/* Reserve the label's width while the loading icon occupies its center. No toolbar/editor reflow. */
+.json-format-button { position: relative; }
+.json-format-button.is-loading :deep(> .el-icon.is-loading) { position: absolute; left: calc(50% - 7px); top: calc(50% - 7px); }
+.json-format-button.is-loading :deep(> span) { opacity: 0; margin-left: 0 !important; }
+
+/* The service teleports this dialog to body; scope motion to this repair prompt only. */
+:global(.json-repair-success-overlay.fade-in-linear-leave-active) {
+    transition: opacity 240ms ease;
+}
+:global(.json-repair-success-overlay.fade-in-linear-leave-active .el-overlay-message-box) {
+    animation: none;
+}
+:global(.json-repair-success-overlay.fade-in-linear-leave-active .json-repair-success-dialog) {
+    transition: transform 240ms cubic-bezier(0.4, 0, 1, 1), opacity 240ms ease;
+    transform-origin: center;
+}
+:global(.json-repair-success-overlay.fade-in-linear-leave-to .json-repair-success-dialog) {
+    opacity: 0;
+    transform: scale(0.88);
+}
+
 /* 折叠信息文本样式 */
 :deep(.folding-info-text) {
     color: #909399;
@@ -6337,68 +6311,6 @@ const transferToInput = (e: MouseEvent) => {
     gap: 10px;
 }
 
-.status-action-menu {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-left: auto;
-}
-
-.status-action-button {
-    height: 20px;
-    min-width: 28px;
-    padding: 0 5px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--json-tool-text-muted);
-    font-size: 12px;
-    line-height: 18px;
-    cursor: pointer;
-    opacity: 0.88;
-    transition:
-        background-color 0.16s ease,
-        border-color 0.16s ease,
-        color 0.16s ease,
-        opacity 0.16s ease;
-}
-
-.status-action-button--theme {
-    min-width: 24px;
-    padding: 0 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.status-theme-icon {
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.status-theme-icon--sun {
-    color: #d08a1f;
-}
-
-.status-theme-icon--moon {
-    color: #667499;
-}
-
-.status-action-button:hover,
-.status-action-button:focus-visible {
-    background: color-mix(in srgb, var(--json-tool-surface-panel) 86%, var(--json-tool-primary) 14%);
-    border-color: color-mix(in srgb, var(--json-tool-border) 72%, transparent);
-    color: var(--json-tool-text);
-    opacity: 1;
-    outline: none;
-}
-
 /* 确保Monaco编辑器内部元素也有正确的背景色 */
 :deep(.monaco-editor .monaco-editor-background) {
     background-color: var(--json-tool-editor-bg);
@@ -6972,6 +6884,10 @@ const transferToInput = (e: MouseEvent) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    :global(.json-repair-success-overlay.fade-in-linear-enter-active),
+    :global(.json-repair-success-overlay.fade-in-linear-leave-active),
+    :global(.json-repair-success-overlay .el-overlay-message-box),
+    :global(.json-repair-success-overlay .json-repair-success-dialog),
     .json-tool-root,
     .json-tool-container,
     .tool-bar,

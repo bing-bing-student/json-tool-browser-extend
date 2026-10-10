@@ -1,5 +1,5 @@
 // IndexedDB 原语与常量
-// 对外暴露 openJsonToolDb / idbGet / idbPut / idbCount / idbDelete / idbGetAll，
+// 对外暴露 openJsonToolDb / idbGet / idbPut / idbCount / idbDelete / idbGetAll / idbGetAllKeys，
 // 以及数据库/对象仓库名、Tab 心跳记录类型等常量。
 // 模块级 idbOpenPromise 单例保证整个应用只打开一次数据库连接。
 
@@ -142,5 +142,16 @@ export const idbGetAll = async <T>(storeName: string): Promise<T[]> => {
         const req = store.getAll();
         req.onsuccess = () => resolve((req.result ?? []) as T[]);
         req.onerror = () => reject(req.error ?? new Error('IndexedDB getAll failed'));
+    });
+};
+
+/** GC 只需标签页键，避免把每个存档桶和 Diff 草稿的正文克隆到主线程。 */
+export const idbGetAllKeys = async (storeName: string): Promise<IDBValidKey[]> => {
+    const db = await openJsonToolDb();
+    return await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).getAllKeys();
+        req.onsuccess = () => resolve(req.result ?? []);
+        req.onerror = () => reject(req.error ?? new Error('IndexedDB getAllKeys failed'));
     });
 };

@@ -39,6 +39,7 @@ export interface PersistedSettings {
     indentSize: number;
     encodingMode: boolean;
     arrayNewLine: boolean;
+    repairOnFormat: boolean;
     sortMethod: SortMethod;
     sortOrder: SortOrder;
     diffSortArrays: boolean;
@@ -67,6 +68,7 @@ const defaultSettings: PersistedSettings = {
     indentSize: 2,
     encodingMode: false,
     arrayNewLine: true,
+    repairOnFormat: false,
     sortMethod: 'dictionary',
     sortOrder: 'asc',
     diffSortArrays: false,
@@ -110,6 +112,7 @@ export interface UseToolSettingsReturn {
     wordWrap: Ref<boolean>;
     fontSize: Ref<number>;
     arrayNewLine: Ref<boolean>;
+    repairOnFormat: Ref<boolean>;
     showMinimap: Ref<boolean>;
     enableDiagnostics: Ref<boolean>;
     preferredEnableDiagnostics: Ref<boolean>;
@@ -141,6 +144,7 @@ export const useToolSettings = (): UseToolSettingsReturn => {
     const wordWrap = ref(savedSettings.wordWrap);
     const fontSize = ref(savedSettings.fontSize || 12);
     const arrayNewLine = ref(savedSettings.arrayNewLine);
+    const repairOnFormat = ref(savedSettings.repairOnFormat === true);
     const preserveNumberLiterals = { value: true } as const;
     const showMinimap = ref(savedSettings.showMinimap ?? false);
     const enableDiagnostics = ref(savedSettings.enableDiagnostics ?? true);
@@ -169,6 +173,7 @@ export const useToolSettings = (): UseToolSettingsReturn => {
             indentSize: indentSize.value,
             encodingMode: encodingMode.value,
             arrayNewLine: arrayNewLine.value,
+            repairOnFormat: repairOnFormat.value,
             sortMethod: sortMethod.value,
             sortOrder: sortOrder.value,
             diffSortArrays: diffSortArrays.value,
@@ -196,6 +201,7 @@ export const useToolSettings = (): UseToolSettingsReturn => {
             indentSize.value,
             encodingMode.value,
             arrayNewLine.value,
+            repairOnFormat.value,
             preserveNumberLiterals.value,
             sortMethod.value,
             sortOrder.value,
@@ -220,6 +226,7 @@ export const useToolSettings = (): UseToolSettingsReturn => {
         wordWrap,
         fontSize,
         arrayNewLine,
+        repairOnFormat,
         showMinimap,
         enableDiagnostics,
         preferredEnableDiagnostics,

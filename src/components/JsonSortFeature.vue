@@ -122,6 +122,12 @@
 </template>
 
 <script setup lang="ts">
+import { ElAutocomplete, ElButton, ElDialog, ElPopover } from 'element-plus';
+import 'element-plus/es/components/autocomplete/style/css';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/popover/style/css';
+
 import { computed } from 'vue';
 import type { SettingsTxt } from './utils/i18n';
 import type { SortOrder } from './composables/useToolSettings';

@@ -20,6 +20,7 @@ import { type Ref, type InjectionKey, onBeforeUnmount, onMounted, ref, watch } f
 import { calculateHash } from '../utils/byteUtils';
 import { replaceEditorValuePreservingUndo } from '../utils/diffMonaco';
 import { type SettingsTxt } from '../utils/i18n';
+import type { DiffLocaleState } from '../utils/jsonToolLocaleTransition';
 import { IDB_DB_NAME, IDB_DB_VERSION, IDB_STORE_TAB_HEARTBEATS } from '../utils/idb';
 import { type SortOrder } from '../utils/jsonSort';
 import type { JsonToolThemeMode } from '../utils/monacoThemes';
@@ -33,6 +34,9 @@ interface InputContextKeyHandle {
 }
 
 export interface UseDiffModeCtx {
+    localeState?: DiffLocaleState;
+    exactComparison?: Ref<boolean>;
+    onComparisonMounted?: () => void;
     // i18n
     settingsTxt: Ref<SettingsTxt>;
     locale: Ref<'zh' | 'en' | undefined>;
@@ -79,6 +83,8 @@ export interface UseDiffModeCtx {
 }
 
 export interface UseDiffModeReturn {
+    comparisonBusy: Ref<boolean>;
+    cancelComparison: () => void;
     // 模式状态
     isDiffMode: Ref<boolean>;
     diffLeftEditorContainer: Ref<HTMLElement | null>;
@@ -96,6 +102,7 @@ export interface UseDiffModeReturn {
     // 模式生命周期
     enterDiffMode: () => void;
     exitDiffMode: () => Promise<void>;
+    captureLocaleState: () => DiffLocaleState;
 
     // editor 访问器
     getDiffLeftEditor: () => monaco.editor.IStandaloneCodeEditor | null;
@@ -150,6 +157,8 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
 
     // ==================== 包裹 useDiffEditors ====================
     const diffEditors = useDiffEditors({
+        localeState: ctx.localeState,
+        exactComparison: ctx.exactComparison,
         leftContainerRef: diffLeftEditorContainer,
         rightContainerRef: diffRightEditorContainer,
         leftStatusRef: diffLeftEditorStatus,
@@ -170,6 +179,7 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
         detectIndentSize: ctx.detectIndentSize,
         onBeforeDisposeEditor: ctx.onBeforeDisposeEditor,
     });
+    ctx.localeState = undefined;
 
     const {
         diffCount,
@@ -211,10 +221,18 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
         await ctx.restoreNormalEditors();
     };
 
+    const captureLocaleState = (): DiffLocaleState => ({
+        left: { text: getDiffLeftEditor()?.getValue() ?? diffDraftLeftText.value, viewState: getDiffLeftEditor()?.saveViewState() ?? null },
+        right: { text: getDiffRightEditor()?.getValue() ?? diffDraftRightText.value, viewState: getDiffRightEditor()?.saveViewState() ?? null },
+        activeDiffIndex: activeDiffIndex.value,
+        wasFullscreenBeforeDiff: false,
+    });
+
     // 子组件 onMounted：v-if 渲染了 .diff-editor-instance 后再创建 Monaco
     const handleDiffPaneMounted = () => {
         createDiffEditor();
-        void restoreDiffDraftIntoEditors();
+        if (ctx.exactComparison?.value) ctx.onComparisonMounted?.();
+        else void restoreDiffDraftIntoEditors();
     };
 
     // ==================== 输入区 → Diff 草稿 ====================
@@ -424,6 +442,8 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
     }
 
     return {
+        comparisonBusy: diffEditors.comparisonBusy,
+        cancelComparison: diffEditors.cancelComparison,
         isDiffMode,
         diffLeftEditorContainer,
         diffRightEditorContainer,
@@ -438,6 +458,7 @@ export const useDiffMode = (ctx: UseDiffModeCtx): UseDiffModeReturn => {
 
         enterDiffMode,
         exitDiffMode,
+        captureLocaleState,
 
         getDiffLeftEditor,
         getDiffRightEditor,

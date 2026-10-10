@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { getJsonToolManualChunk } from './scripts/vite/monaco-chunks.mjs';
 import { monacoLargeFoldingPlugin } from './scripts/vite/monaco-large-folding.mjs';
 
 export default defineConfig({
@@ -19,10 +20,7 @@ export default defineConfig({
         chunkSizeWarningLimit: 1800,
         rollupOptions: {
             output: {
-                manualChunks(id) {
-                    if (id.includes('/node_modules/monaco-editor/')) return 'monaco';
-                    if (id.includes('/node_modules/element-plus/')) return 'element-plus';
-                },
+                manualChunks: getJsonToolManualChunk,
             },
         },
     },

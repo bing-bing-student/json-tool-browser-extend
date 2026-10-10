@@ -120,7 +120,7 @@ export const sortJsonObject = (obj: any, method: SortMethod, order: SortOrder, f
             const entries = Object.entries(obj);
             const compareFn = getCompareFunction(method, fieldPath);
 
-            const sortedEntries = entries.sort(([keyA, valA], [keyB, valB]) => {
+            const sortedEntries = entries.sort(([, valA], [, valB]) => {
                 const result = compareFn(valA, valB);
                 return order === 'asc' ? result : -result;
             });

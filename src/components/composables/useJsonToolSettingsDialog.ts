@@ -171,5 +171,3 @@ export const useJsonToolSettingsDialog = (ctx: UseJsonToolSettingsDialogCtx) => 
         openSettingsDialog,
     };
 };
-
-export type UseJsonToolSettingsDialogReturn = ReturnType<typeof useJsonToolSettingsDialog>;

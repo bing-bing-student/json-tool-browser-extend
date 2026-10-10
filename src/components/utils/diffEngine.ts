@@ -2,7 +2,7 @@
 //
 // - DiffLineChange / InlineDiffSegment / InlineDiffResult：行级与行内片段的结构定义
 // - computeLineDiff：基于 histogram-diff 主路径 + LCS 兜底，先线性裁公共前后缀
-// - computeInlineDiff：基于 jsdiff 的字符级 diff，超长行 / 大窗口走整段标记降级
+// - computeInlineDiff：先裁公共前后缀，再对有界窗口做字符级 diff
 
 import { diffChars, type Change as DiffChange } from 'diff';
 import { histogramDiff, type Region as HistogramRegion } from 'histogram-diff';
@@ -31,8 +31,6 @@ export interface InlineDiffResult {
     tooLarge: boolean;
 }
 
-/** 单行长度超过这个阈值直接跳过行内 diff（避免 UI 卡顿） */
-const INLINE_DIFF_MAX_LINE_LEN = 200_000;
 /** 前后缀裁剪后中间差异窗口超过这个阈值，放弃 diffChars，整段标记 */
 const INLINE_DIFF_WINDOW_LIMIT = 20_000;
 
@@ -240,12 +238,12 @@ const computeLineDiffWithLcsFallback = (leftNorm: string[], rightNorm: string[])
  * 主路径使用 histogram diff（更适合重复行较多的大 JSON / 数组场景），
  * 并先线性裁掉公共前后缀以避免超大相同文件误报成整段 diff。
  */
-export const computeLineDiff = (leftLines: string[], rightLines: string[]): DiffLineChange[] => {
+export const computeLineDiff = (leftLines: string[], rightLines: string[], options: { exact?: boolean } = {}): DiffLineChange[] => {
     const m = leftLines.length;
     const n = rightLines.length;
 
-    const leftNorm = normalizeLinesForDiff(leftLines);
-    const rightNorm = normalizeLinesForDiff(rightLines);
+    const leftNorm = options.exact ? leftLines : normalizeLinesForDiff(leftLines);
+    const rightNorm = options.exact ? rightLines : normalizeLinesForDiff(rightLines);
 
     if (m === 0 && n === 0) return [];
 
@@ -276,17 +274,71 @@ export const computeLineDiff = (leftLines: string[], rightLines: string[]): Diff
 };
 
 /**
+ * 修复可能在修改内容的同时添加数组外壳等新行。将不等长差异块里可以可靠
+ * 对应的行拆出来，避免把新增的 `[` 和修改后的日志强配对或跳过字符高亮。
+ * 只在附近寻找有足够公共前后缀的行；无法确认时保留原来的整块差异。
+ */
+export const refineRepairLineChanges = (left: string[], right: string[], changes: DiffLineChange[]): DiffLineChange[] => {
+    const result: DiffLineChange[] = [];
+    let remainingComparisons = 10_000;
+    const similarity = (a: string, b: string): number => {
+        if (--remainingComparisons < 0) return 0;
+        a = a.trim(); b = b.trim();
+        if (!a.length || !b.length) return 0;
+        const minLength = Math.min(a.length, b.length);
+        let prefix = 0, suffix = 0;
+        while (prefix < minLength && a.charCodeAt(prefix) === b.charCodeAt(prefix)) prefix++;
+        while (suffix < minLength - prefix && a.charCodeAt(a.length - suffix - 1) === b.charCodeAt(b.length - suffix - 1)) suffix++;
+        const common = prefix + suffix;
+        return common >= Math.min(4, minLength) ? common / Math.max(a.length, b.length) : 0;
+    };
+    const append = (aStart: number, aEnd: number, bStart: number, bEnd: number) => {
+        if (aStart === aEnd && bStart === bEnd) return;
+        const previous = result[result.length - 1];
+        // Keep adjacent paired replacements in one block; inserted/deleted lines stay separate.
+        if (aEnd - aStart > 0 && aEnd - aStart === bEnd - bStart && previous &&
+            previous.originalEndLineNumber - previous.originalStartLineNumber === previous.modifiedEndLineNumber - previous.modifiedStartLineNumber &&
+            previous.originalEndLineNumber >= previous.originalStartLineNumber &&
+            previous.originalEndLineNumber === aStart && previous.modifiedEndLineNumber === bStart) {
+            previous.originalEndLineNumber = aEnd; previous.modifiedEndLineNumber = bEnd;
+        } else {
+            result.push({ originalStartLineNumber: aStart + 1, originalEndLineNumber: aEnd,
+                modifiedStartLineNumber: bStart + 1, modifiedEndLineNumber: bEnd });
+        }
+    };
+    for (const change of changes) {
+        let a = change.originalStartLineNumber - 1, b = change.modifiedStartLineNumber - 1;
+        const aEnd = change.originalEndLineNumber, bEnd = change.modifiedEndLineNumber;
+        while (a < aEnd && b < bEnd && aEnd - a !== bEnd - b) {
+            let bestScore = similarity(left[a], right[b]), skipLeft = 0, skipRight = 0;
+            // Only skip on the longer side, and bound the work on large corrupted documents.
+            const extraLeft = Math.max(0, (aEnd - a) - (bEnd - b));
+            const extraRight = Math.max(0, (bEnd - b) - (aEnd - a));
+            for (let offset = 1; offset <= Math.min(8, Math.max(extraLeft, extraRight)) && bestScore < 0.98 && remainingComparisons > 0; offset++) {
+                const score = extraLeft ? similarity(left[a + offset], right[b]) : similarity(left[a], right[b + offset]);
+                if (score > bestScore) { bestScore = score; skipLeft = extraLeft ? offset : 0; skipRight = extraRight ? offset : 0; }
+            }
+            if (bestScore < 0.6) break;
+            append(a, a + skipLeft, b, b + skipRight);
+            a += skipLeft; b += skipRight;
+            if (left[a] !== right[b]) append(a, a + 1, b, b + 1);
+            a++; b++;
+        }
+        append(a, aEnd, b, bEnd);
+    }
+    return result;
+};
+
+/**
  * 计算两行字符串的行内字符级差异，返回可直接用于 Monaco inlineClassName
  * 装饰的列号片段。内部做了前后缀公共串裁剪 + 差异窗口兜底，
  * 能安全处理 ~1MB 长字符串的常见 case（差异集中在一小段）。
  */
 export const computeInlineDiff = (left: string, right: string): InlineDiffResult | null => {
     if (left === right) return null;
-
-    // 防御：超长单行直接放弃行内细化
-    if (left.length > INLINE_DIFF_MAX_LINE_LEN || right.length > INLINE_DIFF_MAX_LINE_LEN) {
-        return null;
-    }
+    const splitsSurrogate = (text: string, index: number) =>
+        index > 0 && index < text.length && text.charCodeAt(index - 1) >= 0xD800 && text.charCodeAt(index - 1) <= 0xDBFF &&
+        text.charCodeAt(index) >= 0xDC00 && text.charCodeAt(index) <= 0xDFFF;
 
     // 1. 最长公共前缀
     const minLen = Math.min(left.length, right.length);
@@ -294,12 +346,15 @@ export const computeInlineDiff = (left: string, right: string): InlineDiffResult
     while (prefixLen < minLen && left.charCodeAt(prefixLen) === right.charCodeAt(prefixLen)) {
         prefixLen++;
     }
+    // Monaco columns count UTF-16 units, but the changed window must retain complete code points.
+    if (splitsSurrogate(left, prefixLen) || splitsSurrogate(right, prefixLen)) prefixLen--;
     // 2. 最长公共后缀（不能和前缀重叠）
     let suffixLen = 0;
     const maxSuffix = minLen - prefixLen;
     while (suffixLen < maxSuffix && left.charCodeAt(left.length - 1 - suffixLen) === right.charCodeAt(right.length - 1 - suffixLen)) {
         suffixLen++;
     }
+    if (splitsSurrogate(left, left.length - suffixLen) || splitsSurrogate(right, right.length - suffixLen)) suffixLen--;
 
     const leftMidLen = left.length - prefixLen - suffixLen;
     const rightMidLen = right.length - prefixLen - suffixLen;
@@ -319,9 +374,10 @@ export const computeInlineDiff = (left: string, right: string): InlineDiffResult
     const leftMid = left.slice(prefixLen, left.length - suffixLen);
     const rightMid = right.slice(prefixLen, right.length - suffixLen);
 
-    let changes: DiffChange[];
+    let changes: DiffChange[] | undefined;
     try {
-        changes = diffChars(leftMid, rightMid);
+        changes = diffChars(leftMid, rightMid, { timeout: 50, maxEditLength: 2000 });
+        if (!changes) throw new Error('Inline diff exceeded its work budget');
     } catch {
         // jsdiff 在极端输入下可能抛错，安全降级
         return {

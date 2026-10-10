@@ -32,6 +32,11 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton, ElDialog, ElInput } from 'element-plus';
+import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/dialog/style/css';
+import 'element-plus/es/components/input/style/css';
+
 import { ref, watch, nextTick, computed } from 'vue';
 import { SETTINGS_TXT_ZH, SETTINGS_TXT_EN } from './utils/i18n';
 

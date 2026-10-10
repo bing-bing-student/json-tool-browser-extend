@@ -12,7 +12,7 @@
 //      让其他 tab 启动时能立刻识别为"已关闭"。
 
 import type { Ref } from 'vue';
-import { IDB_STORE_ARCHIVES, IDB_STORE_DIFF_DRAFTS, IDB_STORE_TAB_HEARTBEATS, type TabHeartbeatRecord, idbDelete, idbGetAll, idbPut } from '../utils/idb';
+import { IDB_STORE_ARCHIVES, IDB_STORE_DIFF_DRAFTS, IDB_STORE_TAB_HEARTBEATS, type TabHeartbeatRecord, idbDelete, idbGetAll, idbGetAllKeys, idbPut } from '../utils/idb';
 
 const TAB_HEARTBEAT_INTERVAL_MS = 30_000; // 30 秒刷一次心跳
 const TAB_HEARTBEAT_EXPIRE_MS = 5 * 60_000; // 5 分钟没刷新认为可能已关
@@ -154,12 +154,12 @@ export const useTabLifecycle = (opts: UseTabLifecycleOptions): UseTabLifecycleRe
      *   5) 200ms 内没回应 → 认定关闭 → 清空它的 archives / diffDraft / heartbeat。
      */
     const garbageCollectClosedTabs = async () => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || isTabPageClosing.value) return;
         try {
             const [heartbeats, archives, diffDrafts] = await Promise.all([
                 idbGetAll<TabHeartbeatRecord>(IDB_STORE_TAB_HEARTBEATS),
-                idbGetAll<{ tabId?: string }>(IDB_STORE_ARCHIVES),
-                idbGetAll<{ tabId?: string }>(IDB_STORE_DIFF_DRAFTS),
+                idbGetAllKeys(IDB_STORE_ARCHIVES),
+                idbGetAllKeys(IDB_STORE_DIFF_DRAFTS),
             ]);
             const now = Date.now();
 
@@ -174,9 +174,8 @@ export const useTabLifecycle = (opts: UseTabLifecycleOptions): UseTabLifecycleRe
 
             // 2) 反向扫描：archives / diffDraft 中存在但心跳表里没有任何记录的孤儿 tabId
             const heartbeatTabIds = new Set(heartbeats.map((h) => h?.tabId).filter(Boolean) as string[]);
-            const orphanCollect = (rec?: { tabId?: string }) => {
-                const tid = rec?.tabId;
-                if (!tid || tid === tabId.value) return;
+            const orphanCollect = (tid: IDBValidKey) => {
+                if (typeof tid !== 'string' || !tid || tid === tabId.value) return;
                 if (heartbeatTabIds.has(tid)) return; // 已在 heartbeat 表里，由上一步处理
                 candidateMap.set(tid, null);
             };
@@ -185,7 +184,9 @@ export const useTabLifecycle = (opts: UseTabLifecycleOptions): UseTabLifecycleRe
 
             // 3) 逐个探活并处理
             for (const [candidateTabId] of candidateMap) {
+                if (isTabPageClosing.value) return;
                 const alive = await probeTabAlive(candidateTabId);
+                if (isTabPageClosing.value) return;
                 if (!alive) {
                     await purgeTabData(candidateTabId);
                 } else {

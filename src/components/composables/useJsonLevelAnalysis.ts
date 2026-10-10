@@ -4,15 +4,8 @@ import JsonLevelAnalysisWorker from '../workers/jsonLevelAnalysis.worker?worker'
 import { getDefaultFoldLevel } from './useJsonFoldingLevels';
 import { type EditorContentLanguage, detectInputLanguage } from '../utils/common';
 import { calculateMaxLevel } from '../utils/jsonStructure';
-
-const INLINE_LEVEL_ANALYSIS_MAX_CHARS = 10 * 1024 * 1024;
-const LEVEL_ANALYSIS_DEBOUNCE_MS = 800;
-
-interface JsonLevelAnalysisWorkerResponse {
-    id: number;
-    level?: number;
-    error?: string;
-}
+import { cleanJsonLevelAnalysisInput, getJsonLevelAnalysisPlan, type JsonLevelAnalysisResponse } from '../utils/jsonLevelAnalysis';
+import type { JsonFormatterOptions } from '../utils/jsonEngine/types';
 
 interface UseJsonLevelAnalysisOptions {
     maxLevel: Ref<number>;
@@ -22,6 +15,7 @@ interface UseJsonLevelAnalysisOptions {
     getOutputEditor: () => monaco.editor.IStandaloneCodeEditor | null;
     updateInputEditorConfig: (language: EditorContentLanguage) => void;
     preprocessJson: (input: string) => unknown;
+    getParserOptions?: () => JsonFormatterOptions;
     resetPrecomputedFoldingInfo: () => void;
     clearOutputFoldingInfo: () => void;
     clearOutputEditor: () => void;
@@ -33,10 +27,17 @@ interface UseJsonLevelAnalysisOptions {
  * options 提供编辑器访问器、解析函数与状态回调；返回值用于安排、取消及销毁分析任务。
  */
 export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
+    let disposed = false;
     let worker: Worker | null = null;
     let timer: number | null = null;
+    let depthLimitTimer: number | null = null;
     let requestId = 0;
     let workerRunning = false;
+    interface AnalysisContext { id: number; model: monaco.editor.ITextModel; version: number; }
+    let activeRequest: AnalysisContext | null = null;
+
+    const isCurrent = (request: AnalysisContext) => !disposed && request.id === requestId && !request.model.isDisposed()
+        && options.getInputEditor()?.getModel() === request.model && request.model.getVersionId() === request.version;
 
     const getModelSampleValue = (
         model: monaco.editor.ITextModel,
@@ -59,6 +60,11 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
             window.clearTimeout(timer);
             timer = null;
         }
+        if (depthLimitTimer !== null) {
+            window.clearTimeout(depthLimitTimer);
+            depthLimitTimer = null;
+        }
+        activeRequest = null;
         if (workerRunning && worker) {
             worker.terminate();
             worker = null;
@@ -66,21 +72,24 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
         }
     };
 
-    const applyLevelAnalysisResult = (level: number) => {
+    const applyLevelAnalysisResult = (level: number, request: AnalysisContext) => {
+        if (!isCurrent(request)) return;
         if (level > 99) {
             options.showDepthLimitError();
             options.maxLevel.value = 0;
             options.selectedLevel.value = 0;
-            window.setTimeout(() => {
+            depthLimitTimer = window.setTimeout(() => {
+                depthLimitTimer = null;
+                if (!isCurrent(request)) return;
                 const inputEditor = options.getInputEditor();
-                const model = inputEditor?.getModel();
+                const model = request.model;
                 if (inputEditor && model) {
                     const fullRange = model.getFullModelRange();
                     if (!fullRange.isEmpty()) {
                         inputEditor.executeEdits('clear-input-depth-limit', [{ range: fullRange, text: '' }]);
                     }
                 }
-                if (options.getOutputEditor()) {
+                if (options.getInputEditor()?.getModel() === model && options.getOutputEditor()) {
                     options.clearOutputFoldingInfo();
                     options.clearOutputEditor();
                 }
@@ -104,23 +113,40 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
 
     const getWorker = () => {
         if (!worker) {
-            worker = new JsonLevelAnalysisWorker();
-            worker.onmessage = (event: MessageEvent<JsonLevelAnalysisWorkerResponse>) => {
+            const ownWorker = new JsonLevelAnalysisWorker();
+            worker = ownWorker;
+            ownWorker.onmessage = (event: MessageEvent<JsonLevelAnalysisResponse>) => {
+                if (worker !== ownWorker) return;
                 const { id, level, error } = event.data;
-                if (id === requestId) workerRunning = false;
-                if (id !== requestId) return;
-                if (error || typeof level !== 'number') {
+                const request = activeRequest;
+                if (!request || id !== request.id) return;
+                workerRunning = false;
+                activeRequest = null;
+                if (!isCurrent(request)) return;
+                if (error || typeof level !== 'number' || !Number.isInteger(level) || level < 0) {
                     resetLevelAnalysisState();
                     return;
                 }
-                applyLevelAnalysisResult(level);
+                applyLevelAnalysisResult(level, request);
             };
+            const handleWorkerFailure = () => {
+                if (worker !== ownWorker) return;
+                const request = activeRequest;
+                ownWorker.terminate();
+                worker = null;
+                workerRunning = false;
+                activeRequest = null;
+                if (request && isCurrent(request)) resetLevelAnalysisState();
+            };
+            ownWorker.onerror = handleWorkerFailure;
+            ownWorker.onmessageerror = handleWorkerFailure;
         }
         return worker;
     };
 
     /** 终止并释放层级分析 Worker；无输入参数，也不返回结果。 */
     const destroyLevelAnalysisWorker = () => {
+        disposed = true;
         cancelPendingLevelAnalysis();
         worker?.terminate();
         worker = null;
@@ -132,6 +158,7 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
      * hasModelContent 表示 Monaco 模型是否非空；函数只更新层级状态，不返回结果。
      */
     const scheduleInputLevelAnalysis = (hasModelContent: boolean) => {
+        if (disposed) return;
         cancelPendingLevelAnalysis();
 
         if (!hasModelContent) {
@@ -140,18 +167,17 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
         }
 
         const inputEditor = options.getInputEditor();
-        const modelLength = inputEditor?.getModel()?.getValueLength() ?? 0;
-        const shouldUseWorker = modelLength > INLINE_LEVEL_ANALYSIS_MAX_CHARS;
-        const currentRequestId = requestId;
-        const delay = shouldUseWorker ? LEVEL_ANALYSIS_DEBOUNCE_MS : 0;
+        const model = inputEditor?.getModel();
+        if (!model || model.isDisposed()) return;
+        const request: AnalysisContext = { id: requestId, model, version: model.getVersionId() };
+        const plan = getJsonLevelAnalysisPlan(model.getValueLength(), model.getLineCount());
 
         timer = window.setTimeout(() => {
             timer = null;
-            if (currentRequestId !== requestId) return;
+            if (!isCurrent(request)) return;
 
-            const model = options.getInputEditor()?.getModel();
-            const languageSample = model ? getModelSampleValue(model) : '';
-            if (!languageSample.trim() && (model?.getValueLength() ?? 0) === 0) {
+            const languageSample = getModelSampleValue(model);
+            if (!languageSample.trim() && model.getValueLength() === 0) {
                 resetLevelAnalysisState(true);
                 return;
             }
@@ -160,30 +186,36 @@ export const useJsonLevelAnalysis = (options: UseJsonLevelAnalysisOptions) => {
             if (detectedLanguage !== options.inputContentLanguage.value) {
                 options.updateInputEditorConfig(detectedLanguage);
             }
+            if (!isCurrent(request)) return;
             if (detectedLanguage !== 'json') {
                 resetLevelAnalysisState();
                 return;
             }
 
-            const value = options.getInputEditor()?.getValue() ?? '';
+            const value = model.getValue();
             if (!value) {
                 resetLevelAnalysisState(true);
                 return;
             }
 
-            if (shouldUseWorker) {
-                workerRunning = true;
-                getWorker().postMessage({ id: currentRequestId, input: value });
-                return;
-            }
-
             try {
-                const cleanedContent = value.replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u0019]+/g, '');
-                applyLevelAnalysisResult(calculateMaxLevel(options.preprocessJson(cleanedContent)));
+                if (plan.useWorker) {
+                    activeRequest = request;
+                    workerRunning = true;
+                    getWorker().postMessage({ id: request.id, input: value, mode: plan.mode, options: options.getParserOptions?.() });
+                    return;
+                }
+                applyLevelAnalysisResult(calculateMaxLevel(options.preprocessJson(cleanJsonLevelAnalysisInput(value))), request);
             } catch {
-                resetLevelAnalysisState();
+                if (activeRequest === request) {
+                    worker?.terminate();
+                    worker = null;
+                    workerRunning = false;
+                    activeRequest = null;
+                }
+                if (isCurrent(request)) resetLevelAnalysisState();
             }
-        }, delay);
+        }, plan.delay);
     };
 
     return {

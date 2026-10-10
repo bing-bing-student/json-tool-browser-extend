@@ -2,12 +2,103 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
 import type { DiffLineChange } from './diffEngine';
+import { getVisibleDiffViewZone } from './diffViewZoneGeometry';
 
 export interface DiffViewZoneSpec {
     afterLineNumber: number;
     heightInPx: number;
     side: 'left' | 'right';
 }
+
+interface DiffViewZonePaint {
+    top: number | null;
+    height: number;
+    side: 'left' | 'right';
+    node: HTMLElement | null;
+}
+
+interface DiffViewZonePainter {
+    zones: Map<string, DiffViewZonePaint>;
+    render: (zone: DiffViewZonePaint) => void;
+    remove: (zoneId: string) => void;
+}
+
+const viewZonePainters = new WeakMap<monaco.editor.IStandaloneCodeEditor, DiffViewZonePainter>();
+
+const getDiffViewZonePainter = (editor: monaco.editor.IStandaloneCodeEditor): DiffViewZonePainter => {
+    const existing = viewZonePainters.get(editor);
+    if (existing) return existing;
+    const zones = new Map<string, DiffViewZonePaint>();
+    const container = document.createElement('div');
+    container.className = 'diff-view-zone-painter';
+    container.setAttribute('aria-hidden', 'true');
+    container.style.pointerEvents = 'none';
+    container.style.overflow = 'hidden';
+    container.style.zIndex = '0';
+    let viewportHeight = 0;
+    const widget: monaco.editor.IOverlayWidget = {
+        getId: () => 'json-tool-diff-view-zone-painter',
+        getDomNode: () => container,
+        getPosition: () => ({ preference: { top: 0, left: editor.getLayoutInfo().contentLeft } }),
+    };
+    const render = (zone: DiffViewZonePaint) => {
+        const scrollTop = editor.getScrollTop();
+        const visible = getVisibleDiffViewZone(zone.top, zone.height, scrollTop, viewportHeight);
+        if (!visible) {
+            zone.node?.remove();
+            zone.node = null;
+            return;
+        }
+        if (!zone.node) {
+            zone.node = document.createElement('div');
+            zone.node.className = `diff-view-zone-spacer diff-view-zone-spacer-${zone.side}`;
+            zone.node.style.position = 'absolute';
+            container.appendChild(zone.node);
+        }
+        zone.node.style.top = `${visible.top}px`;
+        zone.node.style.height = `${visible.height}px`;
+        // Do not draw a new top border in the middle of a scrolled gap.
+        zone.node.style.boxShadow = zone.top !== null && zone.top < scrollTop ? 'none' : '';
+    };
+    const updateLayout = () => {
+        const layout = editor.getLayoutInfo();
+        const horizontalScrollbarHeight = editor.getScrollWidth() > layout.contentWidth ? layout.horizontalScrollbarHeight : 0;
+        viewportHeight = Math.max(0, layout.height - horizontalScrollbarHeight);
+        // contentWidth includes the vertical scrollbar track; paint underneath it
+        // so alignment gaps have the same full-width background as changed rows.
+        container.style.width = `${Math.max(0, layout.contentWidth)}px`;
+        container.style.setProperty('--json-tool-diff-scrollbar-width', `${layout.verticalScrollbarWidth}px`);
+        container.style.height = `${viewportHeight}px`;
+    };
+    updateLayout();
+    editor.addOverlayWidget(widget);
+    const disposables = [
+        editor.onDidLayoutChange(() => {
+            updateLayout();
+            editor.layoutOverlayWidget(widget);
+            zones.forEach(render);
+        }),
+        editor.onDidScrollChange((event) => {
+            if (event.scrollWidthChanged) updateLayout();
+        }),
+    ];
+    editor.onDidDispose(() => {
+        disposables.forEach((disposable) => disposable.dispose());
+        zones.clear();
+        container.remove();
+        viewZonePainters.delete(editor);
+    });
+    const painter: DiffViewZonePainter = {
+        zones,
+        render,
+        remove: (zoneId) => {
+            zones.get(zoneId)?.node?.remove();
+            zones.delete(zoneId);
+        },
+    };
+    viewZonePainters.set(editor, painter);
+    return painter;
+};
 
 const getDiffLineRangeInfo = (change: DiffLineChange) => {
     const hasLeft = change.originalEndLineNumber >= change.originalStartLineNumber;
@@ -56,27 +147,41 @@ export const getEditorBlockHeight = (editor: monaco.editor.IStandaloneCodeEditor
  */
 export const replaceDiffViewZones = (editor: monaco.editor.IStandaloneCodeEditor | null, currentZoneIds: string[], specs: DiffViewZoneSpec[]): string[] => {
     if (!editor) return [];
+    if (!currentZoneIds.length && !specs.length) return [];
+    const painter = getDiffViewZonePainter(editor);
     const nextZoneIds: string[] = [];
     editor.changeViewZones((accessor) => {
         for (const zoneId of currentZoneIds) {
             accessor.removeZone(zoneId);
+            painter.remove(zoneId);
         }
         for (const spec of specs) {
             const heightInPx = Math.max(0, Math.round(spec.heightInPx));
             if (heightInPx <= 0) continue;
             const spacerNode = document.createElement('div');
-            spacerNode.className = `diff-view-zone-spacer diff-view-zone-spacer-${spec.side}`;
+            // Keep the complete logical gap for alignment, but paint its background
+            // in a viewport overlay. A millions-of-pixels DOM background is clipped
+            // by browser size limits and Monaco's large-coordinate content layer.
+            spacerNode.className = 'diff-view-zone-layout-spacer';
             spacerNode.setAttribute('aria-hidden', 'true');
             spacerNode.style.height = `${heightInPx}px`;
             spacerNode.style.pointerEvents = 'none';
-            nextZoneIds.push(
-                accessor.addZone({
-                    afterLineNumber: clampViewZoneAfterLineNumber(editor, spec.afterLineNumber),
-                    heightInPx,
-                    domNode: spacerNode,
-                    suppressMouseDown: true,
-                }),
-            );
+            const paint: DiffViewZonePaint = { top: null, height: heightInPx, side: spec.side, node: null };
+            const zoneId = accessor.addZone({
+                afterLineNumber: clampViewZoneAfterLineNumber(editor, spec.afterLineNumber),
+                heightInPx,
+                domNode: spacerNode,
+                suppressMouseDown: true,
+                onComputedHeight: (height) => { paint.height = height; },
+                onDomNodeTop: (top) => {
+                    const absoluteTop = top + editor.getScrollTop();
+                    // Monaco reports a negative document position for hidden zones.
+                    paint.top = absoluteTop >= 0 ? absoluteTop : null;
+                    painter.render(paint);
+                },
+            });
+            painter.zones.set(zoneId, paint);
+            nextZoneIds.push(zoneId);
         }
     });
     return nextZoneIds;
@@ -141,7 +246,7 @@ export const getDiffChangeTop = (
     const { hasLeft, hasRight, leftLineCount, rightLineCount } = getDiffLineRangeInfo(change);
 
     /** 计算某一侧"差异块顶部"的 Y 坐标（包含 view zone 之前的高度） */
-    const getSideTop = (editor: monaco.editor.IStandaloneCodeEditor, startLineNumber: number, lineCount: number, lineHeight: number) => {
+    const getSideTop = (editor: monaco.editor.IStandaloneCodeEditor, startLineNumber: number, lineCount: number) => {
         if (lineCount <= 0) {
             // 纯插入点：行号 startLineNumber 表示"在该行之前插入"
             return editor.getTopForLineNumber(startLineNumber);
@@ -163,8 +268,8 @@ export const getDiffChangeTop = (
     };
 
     if (hasLeft && hasRight) {
-        const leftTop = getSideTop(leftEditor, change.originalStartLineNumber, leftLineCount, leftLineHeight);
-        const rightTop = getSideTop(rightEditor, change.modifiedStartLineNumber, rightLineCount, rightLineHeight);
+        const leftTop = getSideTop(leftEditor, change.originalStartLineNumber, leftLineCount);
+        const rightTop = getSideTop(rightEditor, change.modifiedStartLineNumber, rightLineCount);
         const leftHeight = getSideContentHeight(leftEditor, change.originalStartLineNumber, change.originalEndLineNumber, leftLineCount, leftLineHeight);
         const rightHeight = getSideContentHeight(rightEditor, change.modifiedStartLineNumber, change.modifiedEndLineNumber, rightLineCount, rightLineHeight);
         // 视觉块高度 = 两侧最大值（短的一侧由 view zone 补齐）
@@ -174,12 +279,12 @@ export const getDiffChangeTop = (
         return visualTop + visualHeight / 2;
     }
     if (hasRight) {
-        const top = getSideTop(rightEditor, change.modifiedStartLineNumber, rightLineCount, rightLineHeight);
+        const top = getSideTop(rightEditor, change.modifiedStartLineNumber, rightLineCount);
         const height = getSideContentHeight(rightEditor, change.modifiedStartLineNumber, change.modifiedEndLineNumber, rightLineCount, rightLineHeight);
         return top + height / 2;
     }
     if (hasLeft) {
-        const top = getSideTop(leftEditor, change.originalStartLineNumber, leftLineCount, leftLineHeight);
+        const top = getSideTop(leftEditor, change.originalStartLineNumber, leftLineCount);
         const height = getSideContentHeight(leftEditor, change.originalStartLineNumber, change.originalEndLineNumber, leftLineCount, leftLineHeight);
         return top + height / 2;
     }

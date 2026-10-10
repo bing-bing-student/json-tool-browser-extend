@@ -1,0 +1,56 @@
+{
+    "others": {
+        "app_name": "测试应用", // 直接使用中文字符串
+        "unicode_escape": "\u6D4B\u8BD5\u5E94\u7528", // Unicode转义序列
+        "description": "这是一个\\\"转义\\\"字符串示例\n支持换行\t和制表符", // 转义字符
+        // 数字类型示例
+        "integer": 42,
+        "negative": -123,
+        "positive_with_plus": +99,
+        "float": 3.14159,
+        "scientific_notation": 1.23e+10,
+        "hex_number": 0x2A, // 十六进制数字
+        "special_numbers": [Infinity, -Infinity, NaN],
+        // 字符串中的十六进制转义
+        "hex_escape_chinese": "\xE4\xBD\xA0\xE5\xA5\xBD", // "你好"的UTF-8字节
+        "mixed_escapes": "普通文本\\u4E16\\u754C\x20Unicode", // 混合转义
+        // 对象键名示例
+        unquoted_key: "值1", // 未加引号的键名
+        'single_quoted_key': "值2", // 单引号键名
+        "double_quoted_key": "值3", // 双引号键名
+        "key-with-dash": "值4", // 包含连字符的键名
+        // 数组示例（包含尾随逗号）
+        "languages": [
+            "JavaScript",
+            "Python",
+            "Java",
+            "C++", // 注意这里的尾随逗号
+        ],
+        // 嵌套对象
+        "database_config": {
+            host: "localhost", // 未加引号的键
+            'port': 5432, // 单引号键
+            "username": "admin", // 双引号键
+            password: "secret123", // 未加引号键
+            options: {
+                ssl: true,
+                timeout: 30000,
+            }, // 尾随逗号
+        },
+        // 多行字符串（使用单引号）
+        "multiline_text": '这是一个 \
+                        多行字符串',
+        // 特殊值
+        "null_value": null,
+        "boolean_values": [
+            true,
+            false
+        ],
+
+        #另一个井号注释 "empty_array": [],
+        "empty_object": {},
+        /* 结尾的多行注释
+           确保所有特性都得到展示 */
+    },
+    "nested_json": "{\"id\":900719925474099312345,\"items\":[1,2,3]}"
+}

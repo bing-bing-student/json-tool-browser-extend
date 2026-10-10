@@ -25,14 +25,20 @@ import { type Ref, ref } from 'vue';
 
 import { calculateByteSize } from '../utils/byteUtils';
 import type { DiffLineChange } from '../utils/diffEngine';
+import type { DiffLocaleState } from '../utils/jsonToolLocaleTransition';
 import { IDB_STORE_DIFF_DRAFTS, MAX_DIFF_SIDE_SIZE, MAX_DIFF_TAB_COUNT, idbCount, idbGet, idbPut } from '../utils/idb';
 import { buildDiffViewZoneSpecs, getDiffChangeTop, layoutOneDiffEditor, replaceDiffViewZones } from '../utils/diffMonaco';
 import { JSON_TOOL_EDITOR_HORIZONTAL_SCROLLBAR_THICKNESS, JSON_TOOL_EDITOR_SCROLLBAR_THICKNESS } from '../utils/editorScrollbar';
 import { getJsonToolWordWrapOptions } from '../utils/editorWordWrap';
+import { getAlignedDiffNavigationBounds, getDiffNavigationScrollTop, getVisibleDiffNavigationMarker, type DiffNavigationBounds } from '../utils/diffNavigation';
 import { getJsonToolThemeForLanguage, type JsonToolThemeMode } from '../utils/monacoThemes';
 import { ensureMonacoTextareaAttrs, type MonacoTextareaAttrObserver } from '../utils/monacoTextareaAttrs';
 
 type DiffEngineModule = Pick<typeof import('../utils/diffEngine'), 'computeLineDiff' | 'computeInlineDiff'>;
+interface RepairComparisonChanges {
+    changes: DiffLineChange[];
+    navigationChanges: DiffLineChange[];
+}
 
 let diffEnginePromise: Promise<DiffEngineModule> | null = null;
 
@@ -56,6 +62,14 @@ interface DiffSyncButton {
     changeIndex: number;
 }
 
+interface DiffNavigationMarker {
+    widget: monaco.editor.IOverlayWidget;
+    node: HTMLElement;
+    bar: HTMLElement;
+    position: monaco.editor.IOverlayWidgetPositionCoordinates;
+    animation: Animation | null;
+}
+
 interface DiffDraftRecord {
     tabId: string;
     leftText: string;
@@ -65,6 +79,7 @@ interface DiffDraftRecord {
 }
 
 export interface UseDiffEditorsOptions {
+    localeState?: DiffLocaleState;
     // DOM 容器与状态条
     leftContainerRef: Ref<HTMLElement | null>;
     rightContainerRef: Ref<HTMLElement | null>;
@@ -93,10 +108,13 @@ export interface UseDiffEditorsOptions {
     /** 内容变化时计算缩进，返回 tab 大小 */
     detectIndentSize: (content: string) => number;
     /** 销毁 editor 前的钩子，让主文件清理诸如 lastFocusedEditor 的引用 */
+    exactComparison?: Ref<boolean>;
     onBeforeDisposeEditor?: (editor: monaco.editor.IStandaloneCodeEditor) => void;
 }
 
 export interface UseDiffEditorsReturn {
+    comparisonBusy: Ref<boolean>;
+    cancelComparison: () => void;
     // 视图层使用的响应式状态
     diffCount: Ref<number>;
     activeDiffIndex: Ref<number>;
@@ -138,6 +156,9 @@ export interface UseDiffEditorsReturn {
 }
 
 export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsReturn => {
+    let pendingLocaleState = opts.localeState;
+    let skipInitialDraftRestore = Boolean(pendingLocaleState);
+    opts.localeState = undefined;
     const {
         leftContainerRef,
         rightContainerRef,
@@ -165,10 +186,14 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     let diffRightEditor: monaco.editor.IStandaloneCodeEditor | null = null;
 
     let diffLineChanges: DiffLineChange[] = [];
+    // Character alignment can split a block; counting/navigation retain the original contiguous blocks.
+    let diffNavigationChanges: DiffLineChange[] = [];
     let diffLeftDecorations: string[] = [];
     let diffRightDecorations: string[] = [];
     let diffLeftViewZoneIds: string[] = [];
     let diffRightViewZoneIds: string[] = [];
+    let leftNavigationMarker: DiffNavigationMarker | null = null;
+    let rightNavigationMarker: DiffNavigationMarker | null = null;
 
     let diffSyncingScroll = false;
     let diffContentDisposables: monaco.IDisposable[] = [];
@@ -180,11 +205,182 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     let diffRecomputeRaf: number | null = null;
     let diffRecomputeRequestId = 0;
 
+    const comparisonBusy = ref(false);
+    let repairWorker: Worker | null = null;
+    let rejectRepairCompare: ((error: Error) => void) | null = null;
+    let repairInlineRequestId = 0;
+    let repairInlineRaf: number | null = null;
+    let pendingRepairRevealIndex: number | null = null;
+    const isLargeRepairDiff = () => Boolean(opts.exactComparison?.value && diffLineChanges.length > 2000);
+    let inlineLeftDecorations: string[] = [], inlineRightDecorations: string[] = [];
+    const cancelComparison = () => {
+        repairWorker?.terminate(); repairWorker = null;
+        if (repairInlineRaf !== null) cancelAnimationFrame(repairInlineRaf);
+        repairInlineRaf = null;
+        pendingRepairRevealIndex = null;
+        rejectRepairCompare?.(new Error('Cancelled')); rejectRepairCompare = null;
+        comparisonBusy.value = false;
+    };
+    const requestVisibleInline = () => {
+        if (repairInlineRaf !== null || !repairWorker || comparisonBusy.value || !diffRightEditor) return;
+        repairInlineRaf = requestAnimationFrame(() => {
+            repairInlineRaf = null;
+            if (!repairWorker || comparisonBusy.value || !diffRightEditor) return;
+            const visible = diffRightEditor.getVisibleRanges();
+            if (!visible.length) return;
+            repairWorker.postMessage({ type: 'inline', start: visible[0].startLineNumber, end: visible[visible.length - 1].endLineNumber, requestId: ++repairInlineRequestId });
+        });
+    };
+    const compareInWorker = (left: string[], right: string[]): Promise<RepairComparisonChanges> => {
+        cancelComparison();
+        comparisonBusy.value = true;
+        diffLineChanges = []; diffNavigationChanges = []; diffCount.value = 0; activeDiffIndex.value = -1;
+        hideDiffNavigationMarkers();
+        clearDiffViewZones();
+        if (diffLeftEditor) {
+            diffLeftDecorations = diffLeftEditor.deltaDecorations(diffLeftDecorations, []);
+            inlineLeftDecorations = diffLeftEditor.deltaDecorations(inlineLeftDecorations, []);
+        }
+        if (diffRightEditor) {
+            diffRightDecorations = diffRightEditor.deltaDecorations(diffRightDecorations, []);
+            inlineRightDecorations = diffRightEditor.deltaDecorations(inlineRightDecorations, []);
+        }
+        return new Promise((resolve, reject) => {
+            rejectRepairCompare = reject;
+            try {
+                const worker = new Worker(new URL('../workers/jsonRepairDiff.worker.ts', import.meta.url), { type: 'module' });
+                repairWorker = worker;
+                worker.onmessage = ({ data }) => {
+                    if (repairWorker !== worker) return;
+                    if (data.type === 'changes') { comparisonBusy.value = false; rejectRepairCompare = null; resolve({ changes: data.changes, navigationChanges: data.navigationChanges }); }
+                    if (data.type === 'error') { cancelComparison(); onError(data.message); }
+                    if (data.type === 'inline' && data.requestId === repairInlineRequestId && diffLeftEditor && diffRightEditor) {
+                        const leftDecos: monaco.editor.IModelDeltaDecoration[] = [], rightDecos: monaco.editor.IModelDeltaDecoration[] = [];
+                        for (const row of data.inline) {
+                            for (const seg of row.leftSegments) leftDecos.push({ range: new monaco.Range(row.leftLine, seg.startCol, row.leftLine, seg.endCol), options: { inlineClassName: 'diff-inline-delete' } });
+                            for (const seg of row.rightSegments) rightDecos.push({ range: new monaco.Range(row.rightLine, seg.startCol, row.rightLine, seg.endCol), options: { inlineClassName: 'diff-inline-insert' } });
+                        }
+                        inlineLeftDecorations = diffLeftEditor.deltaDecorations(inlineLeftDecorations, leftDecos);
+                        inlineRightDecorations = diffRightEditor.deltaDecorations(inlineRightDecorations, rightDecos);
+                        // Navigation must also bring a changed character at the end of a long line into view.
+                        if (pendingRepairRevealIndex !== null) {
+                            const navigationChange = diffNavigationChanges[pendingRepairRevealIndex];
+                            const row = data.inline.find((item: { changeIndex: number }) => item.changeIndex === pendingRepairRevealIndex);
+                            pendingRepairRevealIndex = null;
+                            if (row) {
+                                const segment = row.rightSegments[0] || row.leftSegments[0];
+                                const editor = row.rightSegments.length ? diffRightEditor : diffLeftEditor;
+                                const line = row.rightSegments.length ? row.rightLine : row.leftLine;
+                                if (segment) editor.revealRangeInCenterIfOutsideViewport(new monaco.Range(line, segment.startCol, line, segment.endCol));
+                            } else if (navigationChange) {
+                                // A whole inserted/deleted line (e.g. `]`) has no paired character diff.
+                                const hasRight = navigationChange.modifiedEndLineNumber >= navigationChange.modifiedStartLineNumber;
+                                const editor = hasRight ? diffRightEditor : diffLeftEditor;
+                                const line = hasRight ? navigationChange.modifiedStartLineNumber : navigationChange.originalStartLineNumber;
+                                editor.revealRangeInCenterIfOutsideViewport(new monaco.Range(line, 1, line, 1));
+                            }
+                        }
+                    }
+                };
+                worker.onerror = (event) => { if (worker === repairWorker) { cancelComparison(); onError(event.message || 'Diff worker failed'); } };
+                worker.onmessageerror = () => { if (worker === repairWorker) { cancelComparison(); onError('Diff worker result could not be read'); } };
+                worker.postMessage({ type: 'compare', left, right });
+            } catch (error) { comparisonBusy.value = false; rejectRepairCompare = null; reject(error); }
+        });
+    };
     const diffCount = ref(0);
     const activeDiffIndex = ref(-1);
     const diffSyncButtons = ref<DiffSyncButton[]>([]);
-    const diffDraftLeftText = ref('');
-    const diffDraftRightText = ref('');
+    const diffDraftLeftText = ref(pendingLocaleState?.left.text ?? '');
+    const diffDraftRightText = ref(pendingLocaleState?.right.text ?? '');
+
+    const createDiffNavigationMarker = (editor: monaco.editor.IStandaloneCodeEditor, side: 'left' | 'right'): DiffNavigationMarker => {
+        const node = document.createElement('div');
+        node.className = 'diff-navigation-marker';
+        node.dataset.side = side;
+        node.setAttribute('aria-hidden', 'true');
+        node.style.display = 'none';
+        const bar = document.createElement('div');
+        bar.className = 'diff-navigation-marker-bar';
+        node.appendChild(bar);
+        const position = { top: 0, left: 0 };
+        const widget: monaco.editor.IOverlayWidget = {
+            getId: () => `json-tool-diff-navigation-${side}`,
+            getDomNode: () => node,
+            getPosition: () => ({ preference: { ...position } }),
+        };
+        editor.addOverlayWidget(widget);
+        return { node, bar, widget, position, animation: null };
+    };
+
+    const hideDiffNavigationMarkers = () => {
+        for (const marker of [leftNavigationMarker, rightNavigationMarker]) {
+            if (!marker) continue;
+            marker.animation?.cancel();
+            marker.animation = null;
+            marker.node.style.display = 'none';
+        }
+    };
+
+    const getSideNavigationBounds = (editor: monaco.editor.IStandaloneCodeEditor, start: number, end: number): DiffNavigationBounds | null => {
+        if (end < start) return null;
+        const lineCount = editor.getModel()?.getLineCount() ?? 1;
+        const safeStart = Math.max(1, Math.min(start, lineCount));
+        const safeEnd = Math.max(safeStart, Math.min(end, lineCount));
+        return { top: editor.getTopForLineNumber(safeStart), bottom: editor.getBottomForLineNumber(safeEnd) };
+    };
+
+    const getNavigationBounds = (change: DiffLineChange) => {
+        if (!diffLeftEditor || !diffRightEditor) return { left: null, right: null };
+        const left = getSideNavigationBounds(diffLeftEditor, change.originalStartLineNumber, change.originalEndLineNumber);
+        const right = getSideNavigationBounds(diffRightEditor, change.modifiedStartLineNumber, change.modifiedEndLineNumber);
+        if (!isLargeRepairDiff()) {
+            const aligned = getAlignedDiffNavigationBounds(left, right);
+            return { left: aligned, right: aligned };
+        }
+        // Large comparisons omit alignment spacers. An empty side marks its
+        // insertion point rather than copying the other editor's coordinates.
+        const insertionPoint = (editor: monaco.editor.IStandaloneCodeEditor, start: number): DiffNavigationBounds => {
+            const lineCount = editor.getModel()?.getLineCount() ?? 1;
+            const top = editor.getTopForLineNumber(Math.max(1, Math.min(start, lineCount)));
+            return { top, bottom: top + editor.getOption(monaco.editor.EditorOption.lineHeight) };
+        };
+        return {
+            left: left ?? insertionPoint(diffLeftEditor, change.originalStartLineNumber),
+            right: right ?? insertionPoint(diffRightEditor, change.modifiedStartLineNumber),
+        };
+    };
+
+    const updateDiffNavigationMarkers = (animate = false) => {
+        const change = diffNavigationChanges[activeDiffIndex.value];
+        if (!change || !diffLeftEditor || !diffRightEditor || comparisonBusy.value) {
+            hideDiffNavigationMarkers();
+            return;
+        }
+        const bounds = getNavigationBounds(change);
+        const update = (editor: monaco.editor.IStandaloneCodeEditor, marker: DiffNavigationMarker | null, target: DiffNavigationBounds | null) => {
+            if (!marker) return;
+            const layout = editor.getLayoutInfo();
+            // The horizontal scrollbar covers the text area, not this gutter.
+            const visible = target && getVisibleDiffNavigationMarker(target, editor.getScrollTop(), layout.height);
+            if (!visible) {
+                marker.node.style.display = 'none';
+                return;
+            }
+            marker.position.top = visible.top;
+            marker.position.left = layout.decorationsLeft + Math.max(0, layout.decorationsWidth - 4);
+            marker.node.style.height = `${visible.height}px`;
+            marker.node.style.display = '';
+            marker.node.dataset.diffIndex = String(activeDiffIndex.value);
+            editor.layoutOverlayWidget(marker.widget);
+            if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                marker.animation?.cancel();
+                marker.animation = marker.bar.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+            }
+        };
+        update(diffLeftEditor, leftNavigationMarker, bounds.left);
+        update(diffRightEditor, rightNavigationMarker, bounds.right);
+    };
 
     const updateDiffModelDisplayOptions = (model: monaco.editor.ITextModel, displayIndentSize: number) => {
         model.updateOptions({
@@ -201,6 +397,8 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     const rebuildDiffViewZones = (changes: DiffLineChange[]) => {
+        // Avoid creating thousands of DOM view zones in a repair audit with widespread corruption.
+        if (isLargeRepairDiff()) { clearDiffViewZones(); return; }
         if (!diffLeftEditor || !diffRightEditor) {
             diffLeftViewZoneIds = [];
             diffRightViewZoneIds = [];
@@ -250,12 +448,14 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
 
     function recomputeDiff() {
         const requestId = ++diffRecomputeRequestId;
-        void recomputeDiffAsync(requestId);
+        void recomputeDiffAsync(requestId).catch((error) => { if (requestId === diffRecomputeRequestId && error.message !== 'Cancelled') onError(error.message); });
     }
 
     const recomputeDiffAsync = async (requestId: number) => {
+        hideDiffNavigationMarkers();
         if (!diffLeftEditor || !diffRightEditor) {
             diffLineChanges = [];
+            diffNavigationChanges = [];
             diffCount.value = 0;
             diffSyncButtons.value = [];
             clearDiffViewZones();
@@ -269,11 +469,13 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
 
         const leftLines = leftModel.getLinesContent();
         const rightLines = rightModel.getLinesContent();
-        let diffEngine: DiffEngineModule;
+        let diffEngine: DiffEngineModule | undefined;
+        let workerChanges: RepairComparisonChanges | undefined;
         try {
-            diffEngine = await loadDiffEngine();
+            if (opts.exactComparison?.value) workerChanges = await compareInWorker(leftLines, rightLines);
+            else diffEngine = await loadDiffEngine();
         } catch (error: any) {
-            if (requestId === diffRecomputeRequestId) {
+            if (requestId === diffRecomputeRequestId && error?.message !== 'Cancelled') {
                 onError(`diff 引擎加载失败：${error?.message ?? String(error)}`);
             }
             return;
@@ -288,17 +490,17 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             return;
         }
 
-        const { computeLineDiff, computeInlineDiff } = diffEngine;
-        const changes = computeLineDiff(leftLines, rightLines);
+        const changes = workerChanges?.changes ?? diffEngine!.computeLineDiff(leftLines, rightLines);
         diffLineChanges = changes;
-        diffCount.value = changes.length;
+        diffNavigationChanges = workerChanges?.navigationChanges ?? changes;
+        diffCount.value = diffNavigationChanges.length;
         clearDiffViewZones();
         rebuildDiffViewZones(changes);
 
         // 分别在左右编辑器上打差异行高亮
         const leftDecos: monaco.editor.IModelDeltaDecoration[] = [];
         const rightDecos: monaco.editor.IModelDeltaDecoration[] = [];
-        for (const c of changes) {
+        for (const c of (isLargeRepairDiff() ? [] : changes)) {
             const { leftLineCount, rightLineCount, hasLeft, hasRight } = getDiffLineRangeInfo(c);
 
             if (hasLeft) {
@@ -307,7 +509,6 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
                     options: {
                         isWholeLine: true,
                         className: 'diff-line-delete',
-                        linesDecorationsClassName: 'diff-line-delete-margin',
                     },
                 });
             }
@@ -317,7 +518,6 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
                     options: {
                         isWholeLine: true,
                         className: 'diff-line-insert',
-                        linesDecorationsClassName: 'diff-line-insert-margin',
                     },
                 });
             }
@@ -327,13 +527,13 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             // - "N 删 N 增" 的等长替换块：按位置强配对 left[i] ↔ right[i]，
             //   因为等行数的连续替换块基本就是"逐行修改"场景，按位置配对正确率高；
             // - 行数不等（N 删 M 增且 N≠M）：跳过行内 diff，避免位置错位产生误导。
-            if (hasLeft && hasRight && leftLineCount === rightLineCount) {
+            if (diffEngine && hasLeft && hasRight && leftLineCount === rightLineCount) {
                 for (let k = 0; k < leftLineCount; k++) {
                     const leftLineNo = c.originalStartLineNumber + k;
                     const rightLineNo = c.modifiedStartLineNumber + k;
                     const leftLine = leftLines[leftLineNo - 1] ?? '';
                     const rightLine = rightLines[rightLineNo - 1] ?? '';
-                    const inline = computeInlineDiff(leftLine, rightLine);
+                    const inline = diffEngine.computeInlineDiff(leftLine, rightLine);
                     if (!inline) continue;
                     for (const seg of inline.leftSegments) {
                         leftDecos.push({
@@ -353,17 +553,51 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
         diffLeftDecorations = diffLeftEditor.deltaDecorations(diffLeftDecorations, leftDecos);
         diffRightDecorations = diffRightEditor.deltaDecorations(diffRightDecorations, rightDecos);
 
-        if (activeDiffIndex.value >= changes.length) activeDiffIndex.value = changes.length - 1;
+        if (pendingLocaleState) {
+            const state = pendingLocaleState;
+            pendingLocaleState = undefined;
+            if (state.left.viewState) leftEditor.restoreViewState(state.left.viewState);
+            if (state.right.viewState) rightEditor.restoreViewState(state.right.viewState);
+            activeDiffIndex.value = state.activeDiffIndex;
+        }
+        if (activeDiffIndex.value >= diffCount.value) activeDiffIndex.value = diffCount.value - 1;
         updateDiffSyncButtons();
+        requestVisibleInline();
+    };
+
+    const paintVisibleRepairChanges = () => {
+        if (!diffLeftEditor || !diffRightEditor) return;
+        const build = (editor: monaco.editor.IStandaloneCodeEditor, side: 'left' | 'right') => {
+            const visible = editor.getVisibleRanges();
+            if (!visible.length) return [];
+            const start = visible[0].startLineNumber, end = visible[visible.length - 1].endLineNumber;
+            const startKey = side === 'left' ? 'originalStartLineNumber' : 'modifiedStartLineNumber';
+            const endKey = side === 'left' ? 'originalEndLineNumber' : 'modifiedEndLineNumber';
+            let low = 0, high = diffLineChanges.length;
+            while (low < high) { const mid = (low + high) >>> 1; if (Math.max(diffLineChanges[mid][endKey], diffLineChanges[mid][startKey]) < start) low = mid + 1; else high = mid; }
+            const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+            for (let i = low; i < diffLineChanges.length && diffLineChanges[i][startKey] <= end; i++) {
+                const c = diffLineChanges[i];
+                if (c[endKey] < c[startKey]) continue;
+                decorations.push({ range: new monaco.Range(Math.max(start, c[startKey]), 1, Math.min(end, c[endKey]), 1), options: {
+                    isWholeLine: true, className: side === 'left' ? 'diff-line-delete' : 'diff-line-insert',
+                } });
+            }
+            return decorations;
+        };
+        diffLeftDecorations = diffLeftEditor.deltaDecorations(diffLeftDecorations, build(diffLeftEditor, 'left'));
+        diffRightDecorations = diffRightEditor.deltaDecorations(diffRightDecorations, build(diffRightEditor, 'right'));
     };
 
     function updateDiffSyncButtons() {
+        updateDiffNavigationMarkers();
         if (!diffLeftEditor || !diffRightEditor || diffLineChanges.length === 0) {
             diffSyncButtons.value = [];
             if (diffLineChanges.length === 0) activeDiffIndex.value = -1;
             return;
         }
 
+        if (opts.exactComparison?.value) { if (isLargeRepairDiff()) paintVisibleRepairChanges(); requestVisibleInline(); diffSyncButtons.value = []; return; }
         const scrollTop = diffRightEditor.getScrollTop();
         const viewportHeight = diffRightEditor.getLayoutInfo().height;
         const buttons: DiffSyncButton[] = [];
@@ -378,6 +612,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
 
     // ==================== 跳转 / 同步 ====================
     const handleDiffSync = (changeIndex: number, direction: 'left' | 'right') => {
+        if (opts.exactComparison?.value) return;
         if (!diffLeftEditor || !diffRightEditor) return;
         if (changeIndex < 0 || changeIndex >= diffLineChanges.length) return;
         activeDiffIndex.value = changeIndex;
@@ -478,32 +713,52 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
 
     const revealDiffChange = (index: number) => {
         if (!diffLeftEditor || !diffRightEditor) return;
-        if (index < 0 || index >= diffLineChanges.length) return;
-        const change = diffLineChanges[index];
-        const viewportHeight = diffRightEditor.getLayoutInfo().height;
+        if (index < 0 || index >= diffNavigationChanges.length) return;
+        const change = diffNavigationChanges[index];
+        activeDiffIndex.value = index;
+        if (opts.exactComparison?.value) pendingRepairRevealIndex = index;
+        const bounds = getNavigationBounds(change);
+        if (isLargeRepairDiff()) {
+            for (const [editor, target] of [[diffLeftEditor, bounds.left], [diffRightEditor, bounds.right]] as const) {
+                if (!target) continue;
+                const layout = editor.getLayoutInfo();
+                const scrollTop = getDiffNavigationScrollTop(target, editor.getScrollTop(), layout.height - layout.horizontalScrollbarHeight, editor.getOption(monaco.editor.EditorOption.lineHeight));
+                if (scrollTop !== null) editor.setScrollTop(scrollTop);
+            }
+            updateDiffSyncButtons();
+            updateDiffNavigationMarkers(true);
+            return;
+        }
+        if (!bounds.right) return;
+        const layout = diffRightEditor.getLayoutInfo();
+        const viewportHeight = layout.height - layout.horizontalScrollbarHeight;
         const rightLineHeight = diffRightEditor.getOption(monaco.editor.EditorOption.lineHeight);
-        const targetScrollTop = Math.max(0, getDiffChangeTop(diffLeftEditor, diffRightEditor, change) - (viewportHeight - rightLineHeight) / 2);
+        const targetScrollTop = getDiffNavigationScrollTop(bounds.right, diffRightEditor.getScrollTop(), viewportHeight, rightLineHeight);
 
         diffSyncingScroll = true;
         try {
-            diffLeftEditor.setScrollTop(targetScrollTop);
-            diffRightEditor.setScrollTop(targetScrollTop);
+            if (targetScrollTop !== null) {
+                diffLeftEditor.setScrollTop(targetScrollTop);
+                diffRightEditor.setScrollTop(targetScrollTop);
+            }
         } finally {
             diffSyncingScroll = false;
         }
+        requestVisibleInline();
+        updateDiffNavigationMarkers(true);
     };
 
     const goToNextDiff = () => {
-        if (diffLineChanges.length === 0) return;
-        activeDiffIndex.value = activeDiffIndex.value < 0 ? 0 : (activeDiffIndex.value + 1) % diffLineChanges.length;
+        if (diffNavigationChanges.length === 0) return;
+        activeDiffIndex.value = activeDiffIndex.value < 0 ? 0 : (activeDiffIndex.value + 1) % diffNavigationChanges.length;
         revealDiffChange(activeDiffIndex.value);
         updateDiffSyncButtons();
     };
 
     const goToPrevDiff = () => {
-        if (diffLineChanges.length === 0) return;
+        if (diffNavigationChanges.length === 0) return;
         activeDiffIndex.value =
-            activeDiffIndex.value < 0 ? diffLineChanges.length - 1 : (activeDiffIndex.value - 1 + diffLineChanges.length) % diffLineChanges.length;
+            activeDiffIndex.value < 0 ? diffNavigationChanges.length - 1 : (activeDiffIndex.value - 1 + diffNavigationChanges.length) % diffNavigationChanges.length;
         revealDiffChange(activeDiffIndex.value);
         updateDiffSyncButtons();
     };
@@ -516,6 +771,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     const saveDiffDraft = async (reason: string) => {
+        if (opts.exactComparison?.value) return;
         if (typeof window === 'undefined') return;
         if (!tabId.value) return;
 
@@ -559,6 +815,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     const loadDiffDraftSnapshot = async () => {
+        if (opts.exactComparison?.value) return;
         if (typeof window === 'undefined') return;
         if (!tabId.value) return;
 
@@ -572,6 +829,8 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     const restoreDiffDraftIntoEditors = async () => {
+        if (skipInitialDraftRestore) { skipInitialDraftRestore = false; return; }
+        if (opts.exactComparison?.value) return;
         if (typeof window === 'undefined') return;
         if (!tabId.value) return;
         if (!diffLeftEditor || !diffRightEditor) return;
@@ -600,7 +859,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             language: 'json',
             theme: getJsonToolThemeForLanguage('json', themeMode.value),
             folding: false,
-            readOnly: false,
+            readOnly: opts.exactComparison?.value ?? false,
             minimap: { enabled: showMinimap.value },
             lineNumbers: 'on',
             lineNumbersMinChars: 2,
@@ -650,8 +909,8 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             },
         };
 
-        const leftModel = monaco.editor.createModel('', 'json');
-        const rightModel = monaco.editor.createModel('', 'json');
+        const leftModel = monaco.editor.createModel(pendingLocaleState?.left.text ?? '', 'json');
+        const rightModel = monaco.editor.createModel(pendingLocaleState?.right.text ?? '', 'json');
         updateDiffModelDisplayOptions(leftModel, initialIndentSize);
         updateDiffModelDisplayOptions(rightModel, initialIndentSize);
 
@@ -663,8 +922,10 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             ...baseOptions,
             model: rightModel,
         });
-        updateDiffEditorTabSize(diffLeftEditor, '');
-        updateDiffEditorTabSize(diffRightEditor, '');
+        leftNavigationMarker = createDiffNavigationMarker(diffLeftEditor, 'left');
+        rightNavigationMarker = createDiffNavigationMarker(diffRightEditor, 'right');
+        updateDiffEditorTabSize(diffLeftEditor, leftModel.getValue());
+        updateDiffEditorTabSize(diffRightEditor, rightModel.getValue());
 
         diffLeftTextareaAttrObserver?.disconnect();
         diffRightTextareaAttrObserver?.disconnect();
@@ -685,8 +946,10 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
         // 右键菜单：Base64 / URL 编解码（与普通模式 input 一致，使用同一份 i18n 文案）
         registerClipboardActions(diffLeftEditor);
         registerClipboardActions(diffRightEditor);
-        registerEncodingActions(diffLeftEditor);
-        registerEncodingActions(diffRightEditor);
+        if (!opts.exactComparison?.value) {
+            registerEncodingActions(diffLeftEditor);
+            registerEncodingActions(diffRightEditor);
+        }
         filterBuiltinContextMenuActions(diffLeftEditor, [
             'editor.action.changeAll',
             'editor.action.clipboardCutAction',
@@ -714,6 +977,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
                 scheduleDiffRecompute();
             }),
             diffLeftEditor.onDidScrollChange((e) => {
+                if (isLargeRepairDiff()) { updateDiffSyncButtons(); return; }
                 if (diffSyncingScroll || !diffRightEditor) return;
                 diffSyncingScroll = true;
                 try {
@@ -725,6 +989,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
                 updateDiffSyncButtons();
             }),
             diffRightEditor.onDidScrollChange((e) => {
+                if (isLargeRepairDiff()) { updateDiffSyncButtons(); return; }
                 if (diffSyncingScroll || !diffLeftEditor) return;
                 diffSyncingScroll = true;
                 try {
@@ -754,6 +1019,11 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     const destroyDiffEditor = () => {
+        pendingLocaleState = undefined;
+        skipInitialDraftRestore = false;
+        cancelComparison();
+        hideDiffNavigationMarkers();
+        inlineLeftDecorations = []; inlineRightDecorations = [];
         diffRecomputeRequestId++;
         diffContentDisposables.forEach((d) => d.dispose());
         diffContentDisposables = [];
@@ -803,10 +1073,13 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
             diffRightEditor = null;
         }
         diffLineChanges = [];
+        diffNavigationChanges = [];
         diffLeftDecorations = [];
         diffRightDecorations = [];
         diffLeftViewZoneIds = [];
         diffRightViewZoneIds = [];
+        leftNavigationMarker = null;
+        rightNavigationMarker = null;
         diffCount.value = 0;
     };
 
@@ -817,6 +1090,7 @@ export const useDiffEditors = (opts: UseDiffEditorsOptions): UseDiffEditorsRetur
     };
 
     return {
+        comparisonBusy, cancelComparison,
         diffCount,
         activeDiffIndex,
         diffSyncButtons,
